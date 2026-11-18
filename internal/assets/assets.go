@@ -17,6 +17,20 @@ var LogoLight []byte
 //go:embed public.ed25519
 var publicKey []byte
 
+//go:embed catalog.json
+var exampleCatalog []byte
+
+//go:embed catalog.json.sig
+var exampleCatalogSig []byte
+
+// ExampleCatalog returns the signed example catalog shipped inside the binary.
+// It is a development fixture, not a production feed: it points at official
+// vendor archives with their published SHA-256 sums and lets a fresh install
+// work before the remote catalog has ever been fetched.
+func ExampleCatalog() (data, sig []byte) {
+	return append([]byte(nil), exampleCatalog...), append([]byte(nil), exampleCatalogSig...)
+}
+
 // PublicKey returns the embedded Ed25519 public key used to verify manifests.
 // The private key is deliberately NOT embedded: a leaked private key in a
 // shipped binary would let anyone sign malicious manifests.

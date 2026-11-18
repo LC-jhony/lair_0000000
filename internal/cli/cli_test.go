@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lair-sh/lair/internal/app"
+	"github.com/lair-sh/lair/internal/engine"
 )
 
 func TestUsageAndHelp(t *testing.T) {
@@ -24,6 +25,56 @@ func TestUsageAndHelp(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Usage:") {
 		t.Fatalf("help = %q", out.String())
+	}
+}
+
+func TestTUIHelp(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := run([]string{"tui", "--help"}, &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "lair tui") || !strings.Contains(out.String(), "tab") {
+		t.Fatalf("tui help = %q", out.String())
+	}
+	out.Reset()
+	if err := run([]string{"dashboard", "-h"}, &out, &errOut); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "LTS") {
+		t.Fatalf("dashboard help = %q", out.String())
+	}
+}
+
+func TestEmbeddedSignedCatalog(t *testing.T) {
+	t.Setenv("LAIR_HOME", t.TempDir())
+	paths, err := app.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := buildCatalog(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mf := catalog.Get()
+	if mf == nil {
+		t.Fatal("embedded catalog was not accepted")
+	}
+	nodes := mf.Versions("node", app.Platform())
+	if len(nodes) != 1 || nodes[0] != "v26.13.1" {
+		t.Fatalf("node versions = %v", nodes)
+	}
+	if lts := mf.LTSOf("node", "v26.13.1", app.Platform()); lts != "Lithium" {
+		t.Fatalf("LTS = %q", lts)
+	}
+	if dbs := mf.Versions("mariadb", "linux-x64"); len(dbs) != 1 || dbs[0] != "11.4.7" {
+		t.Fatalf("mariadb versions = %v", dbs)
+	}
+	eng, err := engine.New(paths, catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := eng.LatestLTS("node"); got != "v26.13.1" {
+		t.Fatalf("LatestLTS = %q", got)
 	}
 }
 

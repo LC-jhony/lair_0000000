@@ -1,0 +1,79 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "serial": 1000,
+  "generated": "2026-11-17T00:00:00Z",
+  "expires": "2030-01-01T00:00:00Z",
+  "packages": {
+    "mariadb": {
+      "11.4.7": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://archive.mariadb.org/mariadb-11.4.7/bintar-linux-systemd-x86_64/mariadb-11.4.7-linux-systemd-x86_64.tar.gz",
+          "sha256": "805e953042fd2383139f3f7174bee412a21b7d0c57ee69a4c9732989dccd42d3",
+          "size": 374486201,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false
+        }
+      }
+    },
+    "node": {
+      "v26.13.1": {
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-arm64.tar.gz",
+          "sha256": "80a330b35415382878df18d41afbd106ea89bfb3be0087d6608e289a14c5cc7d",
+          "size": 62600078,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false,
+          "lts": "Lithium"
+        },
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.gz",
+          "sha256": "518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778",
+          "size": 62904977,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false,
+          "lts": "Lithium"
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-arm64.tar.gz",
+          "sha256": "aec2514ea1ceb2ba52455e9ec65986f6749a06dd759e5db2a72e6889668c9735",
+          "size": 58340590,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false,
+          "lts": "Lithium"
+        },
+        "macos-x64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-darwin-x64.tar.gz",
+          "sha256": "82bb96078a24ca50b9c9a38f2379e6be6d87171fcd400fc14c8934b3bce96e2f",
+          "size": 59799324,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false,
+          "lts": "Lithium"
+        },
+        "windows-arm64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-win-arm64.zip",
+          "sha256": "181ebe431b90787113a9e4fc80d38ce86d37888a353a0386de44d2872e48cb97",
+          "size": 37036542,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false,
+          "lts": "Lithium"
+        },
+        "windows-x64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-win-x64.zip",
+          "sha256": "e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f1f7",
+          "size": 41166246,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false,
+          "lts": "Lithium"
+        }
+      }
+    }
+  }
+}

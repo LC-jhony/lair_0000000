@@ -36,6 +36,25 @@ func (c *ctx) install(args []string) error {
 	for _, warning := range result.Warnings {
 		c.eprintf("lair: advertencia: %s\n", warning)
 	}
+	// MariaDB is the default database of a fresh Lair installation. A missing
+	// catalog or network must not undo the local setup, so failures are warnings.
+	var db struct {
+		ID               string `json:"id"`
+		AlreadyInstalled bool   `json:"already_installed"`
+	}
+	if err := c.call(daemon.ActionEnsureDatabase, nil, &db); err != nil {
+		c.eprintf("lair: advertencia: no se pudo instalar MariaDB: %v (instálala después con 'lair services install mariadb')\n", err)
+	} else if db.AlreadyInstalled {
+		c.printf("Base de datos: ya hay una instalada.\n")
+	} else {
+		c.printf("Base de datos: instalando %s (por defecto).\n", engine.DefaultDatabaseID)
+		// An install started in the offline dispatcher lives in this process: if
+		// we returned now the CLI would exit and kill the download. With a daemon
+		// the job survives anyway, but waiting gives honest progress in both.
+		if err := c.waitJob(db.ID); err != nil {
+			c.eprintf("lair: advertencia: falló la instalación de MariaDB: %v (reintenta con 'lair services install mariadb')\n", err)
+		}
+	}
 	c.printf("Abre una terminal nueva (o ejecuta `source ~/.bashrc` / `source ~/.zshrc`) para actualizar PATH.\n")
 	c.printf("Comprueba que todo responde con: node -v && npm -v && lair doctor\n\n")
 
@@ -227,7 +246,12 @@ func (c *ctx) status(args []string) error {
 		}
 		c.printf("  %s%s\n", v, active)
 	}
+	defaultDB := st.Defaults["database"]
+	if defaultDB == "" {
+		defaultDB = engine.DefaultDatabaseID
+	}
 	c.printf("\nServices:\n")
+	c.printf("  default database: %s\n", defaultDB)
 	ids := make([]string, 0, len(st.Services))
 	for id := range st.Services {
 		ids = append(ids, id)
@@ -305,7 +329,11 @@ func (c *ctx) installVersion(action string, req daemon.InstallRequest) error {
 	if err := c.call(action, req, &st); err != nil {
 		return err
 	}
-	c.printf("Installing %s %s...\n", req.ID, req.Version)
+	label := req.Version
+	if label == "" {
+		label = st.ID
+	}
+	c.printf("Installing %s...\n", label)
 	if err := c.waitJob(st.ID); err != nil {
 		return err
 	}
@@ -493,6 +521,15 @@ func (c *ctx) services(args []string) error {
 		if !a.deleteData {
 			c.printf("Data was preserved; use --delete-data to remove it.\n")
 		}
+		return nil
+	case "default":
+		if a.id == "" {
+			return fmt.Errorf("usage: lair services default mariadb|mysql|postgres")
+		}
+		if err := c.call(daemon.ActionDBDefault, daemon.DBDefaultRequest{ID: a.id}, nil); err != nil {
+			return err
+		}
+		c.printf("%s is now the default database.\n", a.id)
 		return nil
 	case "create-db":
 		if a.id == "" || a.name == "" {

@@ -106,7 +106,18 @@ func buildCatalog(paths app.Paths) (*manifest.Catalog, error) {
 	if v := os.Getenv("LAIR_MANIFEST_BASE_URLS"); v != "" {
 		base = strings.Split(v, ",")
 	}
-	return manifest.NewCatalog(manifest.CatalogConfig{
+	catalog, err := manifest.NewCatalog(manifest.CatalogConfig{
 		PublicKey: pub, Channel: "stable", BaseURLs: base, Root: paths.Root,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// Seed with the signed example catalog embedded in the binary so installs
+	// work even when every mirror is unreachable. A newer cached or remote
+	// manifest always takes precedence (Catalog.Load refuses older serials).
+	data, sig := assets.ExampleCatalog()
+	if err := catalog.Load(data, sig); err != nil {
+		return nil, fmt.Errorf("load embedded catalog: %w", err)
+	}
+	return catalog, nil
 }

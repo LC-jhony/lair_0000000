@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	urlpkg "net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,11 +65,10 @@ func (d *Downloader) DownloadToProgress(ctx context.Context, urlPath, wantSHA st
 
 	part := filepath.Join(tmpDir, name+".part")
 	var lastErr error
-	for _, base := range d.BaseURLs {
+	for _, url := range resolveURLs(d.BaseURLs, urlPath) {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		url := strings.TrimSuffix(base, "/") + "/" + strings.TrimPrefix(urlPath, "/")
 		err := d.downloadOne(ctx, url, part, wantSHA, onProgress)
 		if err == nil {
 			// Hash matched; move to the verified name inside the temp dir.
@@ -86,22 +86,62 @@ func (d *Downloader) DownloadToProgress(ctx context.Context, urlPath, wantSHA st
 		lastErr = err
 		os.Remove(part)
 	}
-	return "", fmt.Errorf("download failed from all base URLs: %w", lastErr)
+	return "", fmt.Errorf("download failed from all sources: %w", lastErr)
 }
 
-func (d *Downloader) downloadOne(ctx context.Context, url, part, wantSHA string, onProgress func(Progress)) error {
+// resolveURLs keeps absolute artifact URLs as-is (the example catalog points
+// directly at official vendor archives) and only prefixes relative ones with
+// the configured mirror bases.
+func resolveURLs(bases []string, urlPath string) []string {
+	if strings.HasPrefix(urlPath, "http://") || strings.HasPrefix(urlPath, "https://") || strings.HasPrefix(urlPath, "file://") {
+		return []string{urlPath}
+	}
+	out := make([]string, 0, len(bases))
+	for _, base := range bases {
+		out = append(out, strings.TrimSuffix(base, "/")+"/"+strings.TrimPrefix(urlPath, "/"))
+	}
+	return out
+}
+
+// openSource returns the body and its known size, for HTTP(S) and file:// URLs.
+func (d *Downloader) openSource(ctx context.Context, url string) (io.ReadCloser, int64, error) {
+	if strings.HasPrefix(url, "file://") {
+		u, err := urlpkg.Parse(url)
+		if err != nil {
+			return nil, 0, err
+		}
+		f, err := os.Open(u.Path)
+		if err != nil {
+			return nil, 0, err
+		}
+		info, err := f.Stat()
+		if err != nil {
+			f.Close()
+			return nil, 0, err
+		}
+		return f, info.Size(), nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	resp, err := d.client().Do(req)
 	if err != nil {
+		return nil, 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, 0, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
+	}
+	return resp.Body, resp.ContentLength, nil
+}
+
+func (d *Downloader) downloadOne(ctx context.Context, url, part, wantSHA string, onProgress func(Progress)) error {
+	body, total, err := d.openSource(ctx, url)
+	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
-	}
+	defer body.Close()
 
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -112,9 +152,8 @@ func (d *Downloader) downloadOne(ctx context.Context, url, part, wantSHA string,
 	hash := sha256.New()
 	buf := make([]byte, 64*1024)
 	var written int64
-	total := resp.ContentLength
 	for {
-		n, readErr := resp.Body.Read(buf)
+		n, readErr := body.Read(buf)
 		if n > 0 {
 			if _, err := io.MultiWriter(f, hash).Write(buf[:n]); err != nil {
 				return fmt.Errorf("write: %w", err)

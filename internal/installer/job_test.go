@@ -111,6 +111,15 @@ func TestSuccessfulInstall(t *testing.T) {
 	if c.Installed["php/8.4.3"] != "N7" {
 		t.Fatalf("config not updated: %+v", c.Installed)
 	}
+	// The job is removed from the running set as soon as it finishes, but its
+	// final status must remain queryable so CLI polling never races with it.
+	if _, ok := m.Job("php/8.4"); ok {
+		t.Fatal("finished job is still running")
+	}
+	st, ok := m.JobStatus("php/8.4")
+	if !ok || !st.Done || st.Error != "" {
+		t.Fatalf("finished job status = %+v, ok=%v", st, ok)
+	}
 }
 
 func TestNeedsReplacement(t *testing.T) {

@@ -122,6 +122,33 @@ func (c *Catalog) fileModTime(path string) time.Time {
 	return c.now()
 }
 
+// Load verifies signed bytes and installs them as the current snapshot without
+// any network or cache I/O. It is used for the example catalog embedded in the
+// binary, so a fresh install has a usable catalog before the first refresh.
+// An older or equal manifest never replaces the current one.
+func (c *Catalog) Load(data, sig []byte) error {
+	last, err := c.serials.Load(c.cfg.Channel)
+	if err != nil {
+		return err
+	}
+	m, err := Verify(data, sig, c.cfg.PublicKey, VerifyOptions{
+		Channel: c.cfg.Channel, Now: c.now(), LastSerial: last,
+	})
+	if err != nil {
+		return fmt.Errorf("embedded catalog rejected: %w", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.current != nil && c.current.Serial >= m.Serial {
+		return nil
+	}
+	c.current = m
+	raw := append([]byte(nil), data...)
+	c.raw = raw
+	c.fetchedAt = c.now()
+	return nil
+}
+
 // BaseURLs returns a copy of the configured mirror list (in fallback order).
 func (c *Catalog) BaseURLs() []string { return append([]string(nil), c.cfg.BaseURLs...) }
 

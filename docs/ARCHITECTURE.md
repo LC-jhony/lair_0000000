@@ -72,7 +72,7 @@ El token se genera con `crypto/rand`, se escribe en `run/api.token` con `0600` y
 
 ## Decisiones de implementación
 
-- **Sin dependencias externas.** El módulo solo usa la biblioteca estándar; eso permite un binario único y reproducible sin deployment de dependencias en la máquina del usuario.
+- **Sin dependencias de sistema.** La lógica usa la biblioteca estándar; las únicas librerías externas son Charmbracelet (Bubble Tea, Bubbles y Lip Gloss) para el dashboard TUI y `go-isatty` para detectar TTY. Todo se compila dentro de un binario único y reproducible, sin deployment de dependencias en la máquina del usuario.
 - **Capa web embebida.** En lugar de distribuir un proxy externo, se implementa la capa necesaria en Go (`net/http` + `GetCertificate` + FastCGI). Cubre router por host, estáticos y proxy a FPM.
 - **Privilegios únicos y previos.** Ninguna acción privilegiada se ejecuta en caliente: se genera un script que el usuario revisa y ejecuta una vez. El drop-in de systemd usa `AmbientCapabilities=CAP_NET_BIND_SERVICE`, sin ejecutar el daemon como root.
 - **Un solo writer de config.** En producción el daemon posee el `Store`; la CLI solo lo usa en modo offline/bootstrap.

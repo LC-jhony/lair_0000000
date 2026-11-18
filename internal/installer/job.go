@@ -90,10 +90,20 @@ type Manager struct {
 
 	mu      sync.Mutex
 	running map[string]*Job
+	// recent keeps the final status of finished jobs. The CLI polls ActionJob
+	// after starting an install; without this, a fast install could finish and
+	// be forgotten before the first poll, producing a spurious "no job" error.
+	recent      map[string]Status
+	recentOrder []string
 }
 
+const maxRecentJobs = 100
+
 func NewManager(logDir string, dl *download.Downloader, cfg *config.Store) *Manager {
-	return &Manager{logDir: logDir, dl: dl, cfg: cfg, running: map[string]*Job{}}
+	return &Manager{
+		logDir: logDir, dl: dl, cfg: cfg,
+		running: map[string]*Job{}, recent: map[string]Status{},
+	}
 }
 
 // Start begins an install. It returns an error when a job with the same id is
@@ -214,6 +224,13 @@ func (m *Manager) finish(id string, job *Job, err error, success bool) {
 	}
 	m.mu.Lock()
 	delete(m.running, id)
+	m.recent[id] = job.Status()
+	if len(m.recentOrder) >= maxRecentJobs {
+		oldest := m.recentOrder[0]
+		m.recentOrder = m.recentOrder[1:]
+		delete(m.recent, oldest)
+	}
+	m.recentOrder = append(m.recentOrder, id)
 	m.mu.Unlock()
 }
 
@@ -223,6 +240,18 @@ func (m *Manager) Job(id string) (*Job, bool) {
 	defer m.mu.Unlock()
 	j, ok := m.running[id]
 	return j, ok
+}
+
+// JobStatus returns the status of a running or recently finished job. This is
+// what the daemon's job action uses so fast installs can still be observed.
+func (m *Manager) JobStatus(id string) (Status, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if j, ok := m.running[id]; ok {
+		return j.Status(), true
+	}
+	s, ok := m.recent[id]
+	return s, ok
 }
 
 // List returns the currently running jobs.

@@ -1,12 +1,18 @@
 # Lair v1.0.0
 
-Primera versión etiquetada de **Lair**: entorno de desarrollo local para **PHP / Laravel nativo**, sin Docker ni máquinas virtuales. Un único binario Go (biblioteca estándar, cero dependencias externas) contiene la CLI, el daemon y el punto de entrada de los shims. Todo se instala bajo una sola raíz (`$LAIR_HOME`, `$XDG_DATA_HOME/lair` o `~/.local/share/lair`) y los servicios corren como el usuario, escuchando solo en `127.0.0.1`.
+Primera versión etiquetada de **Lair**: entorno de desarrollo local para **PHP / Laravel nativo**, sin Docker ni máquinas virtuales. Un único binario Go contiene la CLI, el daemon, el dashboard de terminal y el punto de entrada de los shims. Todo se instala bajo una sola raíz (`$LAIR_HOME`, `$XDG_DATA_HOME/lair` o `~/.local/share/lair`) y los servicios corren como el usuario, escuchando solo en `127.0.0.1`.
+
+> **Nota de republicación**: el tag `v1.0.0` no se mueve, pero el contenido del release se actualiza con este código. Los tamaños y hashes de las tablas siguientes corresponden a los artefactos originales del release; al publicar los nuevos binarios hay que usar los valores regenerados en `dist/SHA256SUMS` (el tag permanece intacto).
 
 ---
 
 ## Novedades
 
-- **`lair ui`**: panel de administración web embebido (SPA en `127.0.0.1:9797`) que gestiona PHP, Node, servicios, sitios, logs, HTTPS y mantenimiento desde el navegador.
+- **`lair ui`**: panel de administración web embebido (SPA en `127.0.0.1:9797`) que gestiona PHP, Node, **bases de datos**, servicios, sitios, logs, HTTPS y mantenimiento desde el navegador. La vista “Bases de datos” instala MariaDB/MySQL/PostgreSQL, crea BD, elige la predeterminada y controla versión, reinicio y parada.
+- **MariaDB por defecto**: `lair install` instala MariaDB `11.4.7` automáticamente (los fallos de red no abortan el bootstrap). `lair services default mariadb|mysql|postgres` cambia la BD de nuevos proyectos.
+- **Node LTS actual**: `lair node install` (o `lair node install lts`) instala `v26.13.1` “Lithium” con npm `11.20.0`, equivalente a `nvm install 26`. El catálogo firmado trae las seis plataformas con sus SHA-256 oficiales.
+- **Dashboard de terminal**: `lair tui` / `lair dashboard` añade una interfaz interactiva con **Charmbracelet** (Bubble Tea, Bubbles y Lip Gloss), con atajos para Node LTS, PHP, MariaDB, catálogo y servicios. Por esto el binario ya no es “cero dependencias” en tiempo de compilación: las únicas dependencias externas son esas tres librerías de TUI y `mattn/go-isatty` para detectar TTY.
+- **Catálogo firmado embebido**: una copia del manifiesto y su firma viajan dentro del binario, por lo que una instalación nueva funciona sin mirrors. Es un **catálogo de ejemplo de desarrollo**, con clave pública de desarrollo y clave privada fuera de Git; no es un feed de producción.
 - **Lanzador de escritorio**: el `.deb` instala `lair.desktop` e `lair.svg`; el menú de aplicaciones muestra **Lair** y ejecuta `lair ui`.
 - **Paquetes `.deb`** para Linux `amd64` y `arm64`, con binario, docs, lanzador e icono.
 
@@ -16,7 +22,7 @@ Detalles en `README.md` y `docs/CLI.md`.
 
 ## Campos del release
 
-Esta versión publica **un asset por plataforma y arquitectura**: Linux, macOS y Windows, cada uno en `amd64` y `arm64`. Los seis comprimidos contienen `lair` (o `lair.exe`), `README.md` y `RELEASE_NOTES.md`; además, Linux incluye **dos paquetes `.deb`** (`amd64` y `arm64`) para instalar con `dpkg`/`apt`. Los binarios se compilaron con `CGO_ENABLED=0`, `-trimpath` y `-ldflags "-s -w"` (estáticos, sin dependencias externas).
+Esta versión publica **un asset por plataforma y arquitectura**: Linux, macOS y Windows, cada uno en `amd64` y `arm64`. Los seis comprimidos contienen `lair` (o `lair.exe`), `README.md` y `RELEASE_NOTES.md`; además, Linux incluye **dos paquetes `.deb`** (`amd64` y `arm64`) para instalar con `dpkg`/`apt`. Los binarios se compilaron con `CGO_ENABLED=0`, `-trimpath` y `-ldflags "-s -w"` (estáticos, sin dependencias de sistema; las librerías de la TUI quedan embebidas).
 
 ### Campos generales
 
@@ -126,7 +132,7 @@ El icono aparece en el menú tras cerrar sesión y volver a entrar (o con `updat
 | Campo | Apple Silicon (arm64) | Intel (amd64) | Descripción |
 | --- | --- | --- | --- |
 | `Asset` | `lair_1.0.0_darwin_arm64.tar.gz` | `lair_1.0.0_darwin_amd64.tar.gz` | Archivo adjunto al release para esta arquitectura. |
-| `Sistema operativo` | macOS | macOS | Binario estático para macOS; sin Homebrew ni dependencias externas. |
+| `Sistema operativo` | macOS | macOS | Binario estático para macOS; sin Homebrew ni dependencias de sistema. |
 | `Arquitectura` | `arm64` (Apple Silicon) | `amd64` (x86_64, Intel) | Elegir según el chip: M1/M2/M3/M4 → arm64; Intel → amd64. |
 | `Formato` | `.tar.gz` | `.tar.gz` | Se extrae con `tar -xzf`. |
 | `Binario` | `lair` | `lair` | Ejecutable instalado en `$HOME/.local/bin/lair`. |
@@ -166,7 +172,7 @@ Para hacer persistente el PATH, añade `export PATH="$HOME/.local/bin:$PATH"` a 
 | Campo | amd64 (x86_64) | arm64 | Descripción |
 | --- | --- | --- | --- |
 | `Asset` | `lair_1.0.0_windows_amd64.zip` | `lair_1.0.0_windows_arm64.zip` | Archivo adjunto al release para esta arquitectura. |
-| `Sistema operativo` | Windows 10/11 | Windows 10/11 ARM | Binario estático `lair.exe`; sin dependencias externas. |
+| `Sistema operativo` | Windows 10/11 | Windows 10/11 ARM | Binario estático `lair.exe`; sin dependencias de sistema. |
 | `Arquitectura` | `amd64` (x86_64) | `arm64` (AArch64) | Elegir según el procesador: la mayoría de PCs → amd64; Surface/ARM → arm64. |
 | `Formato` | `.zip` | `.zip` | Se extrae con `Expand-Archive`. |
 | `Binario` | `lair.exe` | `lair.exe` | Ejecutable instalado en `%LOCALAPPDATA%\Lair\lair.exe`. |

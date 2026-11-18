@@ -5,11 +5,12 @@ package cli
 import (
 	"os"
 	"os/exec"
+
+	"github.com/mattn/go-isatty"
 )
 
-// isTerminal is a conservative stub on Windows; auto-install prompts are
-// skipped there.
-func isTerminal(f *os.File) bool { return false }
+// isTerminal reports whether f is an interactive Windows console.
+func isTerminal(f *os.File) bool { return isatty.IsTerminal(f.Fd()) }
 
 // execBinary falls back to a child process on Windows (no execve).
 func execBinary(path string, argv, env []string) error {

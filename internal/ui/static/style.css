@@ -69,15 +69,16 @@ main { min-width: 0; }
 .loading { color: var(--muted); padding: 40px; text-align: center; }
 
 .grid { display: grid; gap: 16px; }
+.grid.cols-5 { grid-template-columns: repeat(5, minmax(0,1fr)); }
 .grid.cols-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
 .grid.cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
 .grid.cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
-@media (max-width: 1000px) { .grid.cols-4, .grid.cols-3 { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 1000px) { .grid.cols-5, .grid.cols-4, .grid.cols-3 { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 700px) {
   .app { grid-template-columns: 1fr; }
   .sidebar { height: auto; position: static; }
   #nav { flex-direction: row; flex-wrap: wrap; }
-  .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
+  .grid.cols-5, .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; }
   .topbar, .content { padding-left: 18px; padding-right: 18px; }
 }
 

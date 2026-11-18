@@ -18,6 +18,7 @@ import (
 
 // defaultBaseURLs are the signed-manifest mirrors, tried in order.
 var defaultBaseURLs = []string{
+	"https://raw.githubusercontent.com/lair-sh/lair/main/catalog",
 	"https://cdn.lair.sh/stable",
 	"https://lair-builds.github.io/stable",
 }
@@ -94,6 +95,9 @@ func run(args []string, out, errOut io.Writer) error {
 	if cmd == "ui" {
 		return runUI(rest, out, errOut)
 	}
+	if cmd == "tui" || cmd == "dashboard" {
+		return runTUI(rest, out, errOut)
+	}
 
 	c, err := newCtx(out, errOut)
 	if err != nil {
@@ -164,6 +168,7 @@ Usage:
   lair services update <id> [ver]    Install newest, activate and restart
   lair services uninstall <id> [ver] [--delete-data]
   lair services create-db <id> <name>
+  lair services default mariadb|mysql|postgres   Set the default database
   lair services restart|stop <id>
   lair park                          Park the current directory as <name>.test
   lair link <name> [path]            Park a directory under an explicit host
@@ -173,6 +178,7 @@ Usage:
   lair isolate php|node <version>    Pin a version for a parked site (--off to clear)
   lair logs [name]                   Show a log file (or list logs)
   lair ui                            Open the embedded web admin UI in your browser
+  lair tui | lair dashboard          Interactive CLI dashboard (Charmbracelet)
   lair daemon --foreground           Run the daemon in the foreground (--no-ui, --ui-port N)
 `)
 }

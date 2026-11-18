@@ -23,6 +23,8 @@ const (
 	ActionServiceStop      = "service-stop"
 	ActionServiceUninstall = "service-uninstall"
 	ActionCreateDB         = "create-db"
+	ActionEnsureDatabase   = "ensure-database"
+	ActionDBDefault        = "db-default"
 	ActionPark             = "park"
 	ActionLink             = "link"
 	ActionUnlink           = "unlink"
@@ -105,6 +107,11 @@ type ServiceUninstallRequest struct {
 type CreateDBRequest struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// DBDefaultRequest selects the database used by default in new projects.
+type DBDefaultRequest struct {
+	ID string `json:"id"`
 }
 
 // TextResult carries a command's textual output.

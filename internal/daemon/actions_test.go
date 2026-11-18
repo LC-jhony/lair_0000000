@@ -114,6 +114,38 @@ func TestDispatcherPinIsolateAndLogs(t *testing.T) {
 	}
 }
 
+func TestDispatcherDatabaseDefaults(t *testing.T) {
+	d, paths := testDispatcher(t)
+	// Simulate an already installed MariaDB: no download needed for this test.
+	installed := filepath.Join(paths.Services, "mariadb", "11.4.7-buildN1")
+	if err := os.MkdirAll(installed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		AlreadyInstalled bool `json:"already_installed"`
+	}
+	if err := d.Call(context.Background(), ActionEnsureDatabase, nil, &st); err != nil {
+		t.Fatal(err)
+	}
+	if !st.AlreadyInstalled {
+		t.Fatal("installed MariaDB was not detected")
+	}
+	// A database that is not installed cannot become the default.
+	if err := d.Call(context.Background(), ActionDBDefault, DBDefaultRequest{ID: "postgres"}, nil); err == nil {
+		t.Fatal("uninstalled database accepted as default")
+	}
+	if err := d.Call(context.Background(), ActionDBDefault, DBDefaultRequest{ID: "mariadb"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var status engine.Status
+	if err := d.Call(context.Background(), ActionStatus, nil, &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Defaults["database"] != "mariadb" {
+		t.Fatalf("default database = %q", status.Defaults["database"])
+	}
+}
+
 func TestDispatcherJobsAndShutdown(t *testing.T) {
 	shutdown := make(chan struct{}, 1)
 	paths, err := app.Resolve()

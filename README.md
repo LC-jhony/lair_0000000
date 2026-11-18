@@ -2,7 +2,7 @@
 
 Entorno de desarrollo local para **PHP / Laravel nativo** (sin Docker ni VM). Un solo binario Go reúne la CLI, el daemon y el punto de entrada de los shims: compilas una vez, configuras con dos variables y usas `lair` para todo.
 
-> Estado: fases 1–4 implementadas y testeadas. Linux con `systemd-resolved` es la plataforma completa. La clave Ed25519 incluida es **de desarrollo**; no sirve para producción.
+> Estado: fases 1–6 implementadas y testeadas. Linux con `systemd-resolved` es la plataforma completa. El catálogo firmado incluido es **de ejemplo** (clave Ed25519 de desarrollo con la clave privada fuera de Git); no sirve para producción.
 
 ---
 
@@ -23,8 +23,8 @@ sudo systemctl enable --now lair@$USER
 # 3. usar
 new shell                       # o: source ~/.bashrc
 lair php install 8.4 && lair php use 8.4
-lair node install 22 && lair node default 22
-lair services install postgres 17
+lair node install                        # último LTS firmado: v26.13.1 (npm 11.20.0)
+lair services install postgres 17        # MariaDB ya se instaló con `lair install`
 node -v && npm -v && php -v
 lair doctor                     # diagnóstico si algo no responde
 ```
@@ -51,7 +51,7 @@ lair doctor                     # diagnóstico si algo no responde
 
 ### Requisitos de compilación
 
-Lo único que necesitas para **compilar** es Go 1.21+ (en este entorno: `~/.local/go`, versión 1.27.4). El módulo usa exclusivamente la biblioteca estándar: **no hay `go.mod` con dependencias externas**, no hay `go get`, no hay que descargar librerías. El usuario final no necesita Go: recibe el binario ya compilado.
+Necesitas **Go 1.24.2+** (en este entorno: `~/.local/go`, versión 1.27.4) y acceso a `go mod download` la primera vez. El runtime de Lair usa la biblioteca estándar; las únicas dependencias externas son de la TUI interactiva (`charmbracelet/bubbletea`, `bubbles`, `lipgloss` y `mattn/go-isatty` para detectar TTY). El usuario final no necesita Go: recibe el binario ya compilado. Para compilar sin red, usa la caché de módulos ya descargada.
 
 Si Go está instalado en `~/.local/go`, añádelo al PATH de tu shell:
 
@@ -203,7 +203,7 @@ También se respetan `.nvmrc` y `.node-version` para Node (en ese orden, despué
 |---|---|
 | `LAIR_HOME` | Raíz de datos (ver 2.1). |
 | `XDG_DATA_HOME` | Base alternativa (`$XDG_DATA_HOME/lair`). |
-| `LAIR_MANIFEST_BASE_URLS` | Mirrors del catálogo firmado separados por comas; se prueban en orden. La confianza es de la firma, no del host. |
+| `LAIR_MANIFEST_BASE_URLS` | Mirrors del catálogo firmado separados por comas; se prueban en orden. Por defecto incluye `https://raw.githubusercontent.com/lair-sh/lair/main/catalog`. La confianza es de la firma, no del host. |
 | `LAIR_COMPOSER_DOWNLOAD_URL` | URL alternativa de `composer.phar` (se sigue verificando el SHA-256). |
 | `LAIR_COMPOSER_CHECKSUM_URL` | URL alternativa del `.sha256` de Composer. |
 
@@ -254,6 +254,40 @@ sudo systemctl enable --now lair@$USER
 
 > Lair **no instala** nginx, Laravel Valet ni Mailcatcher: pertenecen al antiguo Valet Deck o al sistema. El uninstall no toca paquetes del sistema; solo limpia cualquier directorio con esos nombres que exista dentro de `$LAIR_HOME` por versiones anteriores.
 
+### 2.7 Catálogo firmado de ejemplo
+
+Lair no consulta un índice editable: consume un **manifiesto firmado con Ed25519**. El binario lleva una copia embebida (`internal/assets/catalog.json` + `.sig`) y el repositorio publica la misma pareja en `catalog/`; por eso una instalación nueva funciona aunque `cdn.lair.sh` o `lair-builds.github.io` estén caídos. Un manifiesto del mirror con serial mayor sustituye al embebido; uno más antiguo se ignora.
+
+> **Este catálogo es un ejemplo de desarrollo, no un feed de producción.** La clave pública está en `keys/public.ed25519` y la privada (`keys/private.ed25519`, `0600`) está excluida de Git. Para producción hay que generar un par nuevo, publicar solo la pública en el binario y firmar los manifiestos con la privada en un entorno controlado.
+
+Incluye Node.js `v26.13.1` LTS “Lithium” (npm `11.20.0`, equivalente a `nvm install 26`) para Linux/macOS/Windows en `x64`/`arm64`, y MariaDB `11.4.7` para `linux-x64`, con los SHA-256 publicados por los fabricantes. No incluye PHP: la CLI y el panel ya saben listar/instalar PHP, pero para usarlo hay que añadir artefactos PHP al manifiesto y volver a firmarlo.
+
+Formato (un build por `paquete → versión → plataforma`):
+
+```json
+{
+  "schema": 1,
+  "channel": "stable",
+  "serial": 1000,
+  "packages": {
+    "node": {
+      "v26.13.1": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://nodejs.org/dist/v26.13.1/node-v26.13.1-linux-x64.tar.gz",
+          "sha256": "518674de2b621728a5e4486f5fb3b7d2900bb3cc4aa97969edaa463db99f9778",
+          "size": 62904977,
+          "published": "2026-11-17T00:00:00Z",
+          "lts": "Lithium"
+        }
+      }
+    }
+  }
+}
+```
+
+`url` admite `https://`, `http://` y `file://` (útil con mirrors internos); las relativas se resuelven contra `LAIR_MANIFEST_BASE_URLS`. El campo `lts` es el que permite a `lair node install` elegir el último LTS. Para añadir PHP, agrega entradas bajo `"php"` con rutas tipo `8.4.3` y ejecutables `bin/php` y `sbin/php-fpm`; la UI y la CLI las mostrarán sin cambios de código. La firma cubre los bytes exactos del JSON, así que cualquier edición sin volver a firmar se rechaza antes de parsearse.
+
 ---
 
 ## 3. El comando `lair`
@@ -264,7 +298,7 @@ El binario es la **única** entrada: `lair <comando> [subcomando] [args] [flags]
 
 | Comando | Descripción |
 |---|---|
-| `lair install` | Bootstrap local (shims, PATH, CA, Composer verificado) y generación de los scripts privilegiados. |
+| `lair install` | Bootstrap local (shims, PATH, CA, Composer verificado), instalación de **MariaDB como base de datos por defecto** y generación de los scripts privilegiados. Si no hay red o catálogo, avisa pero no aborta. |
 | `lair uninstall [--delete-data]` | Elimina PHP, Composer, Node, todos los servicios, shims, PATH y CA local; conserva las bases de datos salvo `--delete-data`. También genera la reversión privilegiada. |
 | `lair status [--json]` | Muestra home, estado del daemon, PHP, Node, servicios, puertos, sitios y jobs. `--json` para scripts. |
 | `lair doctor` | Comprueba PATH, shims y versiones; imprime cómo arreglarlo. **Primer comando si algo no responde.** |
@@ -292,11 +326,12 @@ php -v && composer -V
 | Comando | Descripción |
 |---|---|
 | `lair node list` | Versiones instaladas; `*` marca la default. |
-| `lair node install [versión]` | Instala `22`, `22.11.0` o la última. Regenera los shims al terminar. |
+| `lair node install [versión]` | Sin versión (o `lts` / `latest-lts`) instala el último **LTS** del catálogo firmado: `v26.13.1` (Lithium, npm `11.20.0`), equivalente a `nvm install 26`. También acepta `22`, `22.11.0` o `latest`. Regenera los shims al terminar. |
 | `lair node default <versión>` | Fija la default (acepta major, p. ej. `22`). |
 
 ```sh
-lair node install 22 && lair node default 22
+lair node install                 # LTS actual: v26.13.1
+lair node default v26.13.1
 node -v && npm -v && npx --version
 ```
 
@@ -314,6 +349,7 @@ Forma general: `lair services <acción> <id> [versión] [flags]`.
 | `update` | `lair services update postgres` | Instala la última, activa y reinicia. |
 | `uninstall` | `lair services uninstall postgres 17.2 --delete-data` | Elimina la instalación; sin `--delete-data` conserva los datos. |
 | `create-db` | `lair services create-db postgres laravel` | Crea una base de datos. |
+| `default` | `lair services default mariadb\|mysql\|postgres` | Elige la BD predeterminada de nuevos proyectos (MariaDB por defecto). |
 | `restart` / `stop` | `lair services restart postgres` | Controla el supervisor. |
 
 IDs disponibles: `postgres`, `mysql`, `mariadb`, `mongodb`, `redis`, `valkey`, `meilisearch`, `typesense`, `rustfs`.
@@ -374,11 +410,21 @@ lair ui
 
 - Si el daemon no está activo, `lair ui` lo arranca en segundo plano y espera a que la interfaz responda (máx. 10 s). El registro queda en `$LAIR_HOME/log/daemon-ui.log`.
 - La URL se escribe en `$LAIR_HOME/run/ui.url` (`0600`) e incluye un token de un solo uso en el fragmento (`#token=…`). Ese token nunca viaja en la query ni se envía al servidor: la SPA lo lee de `location.hash`, lo guarda en `sessionStorage` y lo envía como cabecera `X-Lair-Token` a `/api`.
-- El panel gestiona PHP, Node, servicios, sitios (`.test`), logs, certificados HTTPS, pin/isolate, actualización del catálogo, reinicio, `doctor` y desinstalación. Todo pasa por el mismo `Dispatcher` que usa la CLI, sobre un listener solo de loopback.
+- El panel gestiona PHP, Node, **bases de datos** (instalar MariaDB/MySQL/PostgreSQL, crear BD, elegir la predeterminada, usar versión, reiniciar/parar), servicios, sitios (`.test`), logs, certificados HTTPS, pin/isolate, actualización del catálogo, reinicio, `doctor` y desinstalación. Todo pasa por el mismo `Dispatcher` que usa la CLI, sobre un listener solo de loopback.
 - El servidor UI se desactiva con `lair daemon --foreground --no-ui` y su puerto se cambia con `--ui-port N` (por defecto `9797`).
 - El paquete `.deb` instala `/usr/share/applications/lair.desktop` e `/usr/share/icons/hicolor/scalable/apps/lair.svg`. Tras instalar, cierra sesión y vuelve a entrar (o ejecuta `update-desktop-database`) para que el icono aparezca en el menú.
 
-### 3.9 `exec` (interno, no lo llames a mano)
+### 3.9 Dashboard de terminal (`lair tui`)
+
+Si prefieres la terminal, `lair tui` (alias `lair dashboard`) abre un panel interactivo construido con **Charmbracelet** (Bubble Tea, Bubbles y Lip Gloss): pestañas de resumen, runtimes, bases de datos, servicios, sitios y sistema, con `n` (Node LTS), `p` (PHP), `m` (MariaDB), `u` (catálogo), `s` (servicios), `r` (refrescar) y `q` (salir).
+
+```sh
+lair tui          # o: lair dashboard
+```
+
+Cuando stdin no es un TTY (CI, pipes), imprime el mismo estado en texto plano y termina, en lugar de dejar una pantalla completa colgada. Usa el mismo `Dispatcher` que la web y la CLI, así que no hay acciones exclusivas de la TUI.
+
+### 3.10 `exec` (interno, no lo llames a mano)
 
 Cada shim contiene `exec "<lair>" exec <tool> "$@"`. El subcomando oculto `exec` resuelve la versión para el directorio actual y usa `execve`, sin proceso intermediario. Si falta la versión y hay TTY, ofrece instalarla; desde un script, falla con un mensaje claro. Es la pieza que hace que `node`, `php` y `psql` "simplemente funcionen".
 
@@ -396,12 +442,12 @@ sudo "$LAIR_HOME/trust-ca.sh" --add
 sudo systemctl enable --now lair@$USER
 
 lair php install 8.4 && lair php use 8.4
-lair node install 22 && lair node default 22
-lair services install postgres 17
-lair services create-db postgres laravel
+lair node install                       # LTS v26.13.1
+lair services default mariadb           # ya instalada por `lair install`
+lair services create-db mariadb laravel
 
 cd ~/proyectos/mi-app
-lair pin php 8.4 && lair pin node 22
+lair pin php 8.4 && lair pin node v26.13.1
 lair park && lair secure mi-app.test
 
 php -v && composer -V && node -v && npm -v
@@ -476,9 +522,9 @@ La lógica compartida está en `internal/engine`; el daemon y la CLI son dos fre
 |---|---|---|
 | `cmd/lair` | Único `main`: CLI, daemon y `exec`. | `main()` |
 | `app` | Rutas e identidad. | `Resolve()`, `Platform()` |
-| `assets` | Clave pública y logos embebidos (`go:embed`). | `PublicKey()` |
+| `assets` | Clave pública, catálogo de ejemplo firmado y logos embebidos (`go:embed`). | `PublicKey()`, `ExampleCatalog()` |
 | `version` | Parser semver y resolución. | `Parse`, `ExactOrLatest` |
-| `manifest` | Catálogo firmado, serial, caché 6 h, `OnChange`. | `Catalog.Refresh/Subscribe`, `Verify` |
+| `manifest` | Catálogo firmado, serial, caché 6 h, `OnChange`, marcas LTS. | `Catalog.Refresh/Load`, `Verify`, `LTSOf` |
 | `download` + `installer` | Descarga `.part`, SHA-256, `safeJoin`, jobs. | `Manager.Start`, `Job.Status/Cancel` |
 | `config` | Store atómico de `config.json`. | `Store.Update/View` |
 | `php` | Versiones paralelas, php.ini, FPM, Xdebug. | `EnsureINI`, `WriteFPM`, `Env` |
@@ -490,8 +536,8 @@ La lógica compartida está en `internal/engine`; el daemon y la CLI son dos fre
 | `platform` | systemd, polkit, resolved, CA, plan privilegiado. | `BuildPlan`, `InstallTrust` |
 | `dns` / `pki` / `fastcgi` / `web` | `*.test`, TLS local, FPM, router HTTP. | `Server`, `IssueSite`, `Router.Match` |
 | `daemon` | API unix+token y protocolo de acciones. | `Server`, `Client`, `Dispatcher`, `Runtime` |
-| `engine` | Orquestación compartida. | `InstallPHP/Node/Service`, `Status`, `ResolveTool`, `Bootstrap` |
-| `cli` | Comandos, modo offline, `exec`, `doctor`. | `Run`, `runExec` |
+| `engine` | Orquestación compartida. | `InstallPHP/Node/Service`, `LatestLTS`, `EnsureDefaultDatabase`, `Status`, `ResolveTool`, `Bootstrap` |
+| `cli` | Comandos, modo offline, `exec`, `doctor`, TUI Charmbracelet. | `Run`, `runExec`, `runTUI` |
 
 ---
 

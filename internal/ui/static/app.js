@@ -96,6 +96,7 @@
   const viewMeta = {
     panel: ['Panel', 'Estado de tu entorno de desarrollo'],
     runtimes: ['Versiones', 'PHP y Node instalados y disponibles'],
+    databases: ['Bases de datos', 'MariaDB, MySQL y PostgreSQL desde el panel'],
     sites: ['Sitios', 'Dominios .test aparcados en Lair'],
     services: ['Servicios', 'Bases de datos y servicios gestionados'],
     logs: ['Logs', 'Registros de instalación y servicios'],
@@ -122,19 +123,30 @@
     const services = Object.values(s.services || {});
     const running = services.filter((v) => v.running).length;
     const jobs = (s.jobs || []).slice(-5).reverse();
+    const defaultDB = s.defaults?.database || 'mariadb';
+    const dbService = s.services?.[defaultDB];
     const html = `
-      <div class="grid cols-4">
+      <div class="grid cols-5">
         ${stat('PHP', php.length, 'versiones instaladas')}
         ${stat('Node', node.length, 'versiones instaladas')}
+        ${stat('BD', defaultDB, dbService?.running ? 'ejecutando' : 'sin ejecutar')}
         ${stat('Sitios', sites.length, 'dominios .test')}
         ${stat('Servicios', `${running}/${services.length}`, 'activos / configurados')}
       </div>
       <div class="section-title">Accesos rápidos</div>
-      <div class="grid cols-3">
+      <div class="grid cols-2">
         ${card('Instalar PHP', `<div class="form-row"><select id="p-php"></select>
           <button class="primary" data-act="install-php-dlg">Instalar</button></div>`, 'Elige una versión del catálogo firmado')}
-        ${card('Instalar Node', `<div class="form-row"><select id="p-node"></select>
-          <button class="primary" data-act="install-node-dlg">Instalar</button></div>`, 'Versión LTS o actual')}
+        ${card('Instalar Node LTS', `<div class="form-row"><select id="p-node"></select>
+          <button class="primary" data-act="install-node-dlg">Instalar</button></div>`, 'Sin selección = último LTS (v26.13.1)')}
+      </div>
+      <div class="grid cols-2">
+        ${card('Base de datos por defecto', `<div class="item"><span class="name">${esc(defaultDB)}</span>
+          <span class="pill ${dbService?.running ? 'ok' : ''}">${dbService?.running ? 'ejecutando' : 'detenida'}</span></div>
+          <div class="actions"><button class="primary" data-act="install-default-db">Instalar MariaDB</button>
+          <button class="tiny" data-act="db-default" data-payload='{"id":"mysql"}'>Usar MySQL</button>
+          <button class="tiny" data-act="db-default" data-payload='{"id":"postgres"}'>Usar PostgreSQL</button>
+          <button class="tiny" data-act="view-databases">Gestionar BD</button></div>`, 'MariaDB se instala con Lair; cambia la predeterminada cuando quieras')}
         ${card('Mantenimiento', `<div class="row">
           <button class="ghost" data-act="update">↻ Actualizar catálogo</button>
           <button class="ghost" data-act="restart">⟳ Reiniciar servicios</button>
@@ -179,10 +191,52 @@
           <div class="form-row"><select id="r-php"></select><button class="primary" data-act="install-php-dlg">Instalar PHP</button></div>`)}
         ${card('Node instalado', `<div class="list">${nodeList}</div>
           <div class="section-title">Instalar versión</div>
-          <div class="form-row"><select id="r-node"></select><button class="primary" data-act="install-node-dlg">Instalar Node</button></div>`)}
+          <div class="form-row"><select id="r-node"></select><button class="primary" data-act="install-node-dlg">Instalar Node</button></div>
+          <p class="desc">Si no eliges versión se instala el último LTS del catálogo (v26.13.1, npm 11.20.0).</p>`)}
       </div>`;
     fillVersions('r-php', 'php');
     fillVersions('r-node', 'node');
+  }
+
+  function renderDatabases() {
+    const s = state.status || {};
+    const services = s.services || {};
+    const defaultDB = s.defaults?.database || 'mariadb';
+    const ids = ['mariadb', 'mysql', 'postgres'];
+    const installers = ids.map((id) => `
+      <div class="card"><h2>${esc(id === 'mariadb' ? 'MariaDB' : id === 'mysql' ? 'MySQL' : 'PostgreSQL')}</h2>
+        <div class="form-row"><select id="db-ver-${id}"></select>
+          <button class="primary" data-act="install-db" data-payload='{"id":"${id}"}'>Instalar</button></div>
+        <div class="actions"><button class="tiny" data-act="db-default" data-payload='{"id":"${id}"}'>Predeterminada</button></div>
+      </div>`).join('');
+    const installed = ids.map((id) => {
+      const v = services[id];
+      if (!v || !(v.installed || []).length) return '';
+      const isDefault = defaultDB === id;
+      return `<div class="item"><div><span class="name">${esc(id)}</span>
+          <div class="meta">activa: ${esc(v.active || '—')} · instaladas: ${esc((v.installed || []).join(', '))}
+          · puerto ${esc(v.port || '—')}${v.last_error ? ' · ' + esc(v.last_error) : ''}</div></div>
+        <div class="row"><span class="pill ${v.running ? 'ok' : ''}">${v.running ? 'ejecutando' : 'detenido'}</span>
+          ${isDefault ? '<span class="pill ok">predeterminada</span>' : ''}
+          ${actions([
+            ['Crear BD', 'create-db-dlg', { id }],
+            ['Reiniciar', 'service-restart', { id }],
+            ['Parar', 'service-stop', { id }],
+            ['Usar versión', 'service-use-dlg', { id }],
+            [isDefault ? 'Predeterminada ✓' : 'Hacer predeterminada', 'db-default', { id }],
+          ])}</div></div>`;
+    }).filter(Boolean).join('');
+    content().innerHTML = `
+      ${card('Base de datos activa', `<div class="item"><span class="name">${esc(defaultDB)}</span>
+        <span class="meta">${services[defaultDB]?.running ? 'ejecutando' : 'detenida'}</span></div>
+        <div class="actions"><button class="primary" data-act="install-default-db">Instalar MariaDB por defecto</button></div>`,
+        'MariaDB se instala automáticamente con Lair.')}
+      <div class="section-title">Instalar gestor</div>
+      <div class="grid cols-3">${installers}</div>
+      <div class="section-title">Instaladas</div>
+      ${card('Bases de datos gestionadas', installed || empty('Todavía no hay gestores instalados.'),
+        'Los datos se conservan al cambiar de versión.')}`;
+    ids.forEach((id) => fillVersions(`db-ver-${id}`, id));
   }
 
   function renderSites() {
@@ -261,7 +315,7 @@
       </div>`;
   }
 
-  const renderers = { panel: renderPanel, runtimes: renderRuntimes, sites: renderSites, services: renderServices, logs: renderLogs, system: renderSystem };
+  const renderers = { panel: renderPanel, runtimes: renderRuntimes, databases: renderDatabases, sites: renderSites, services: renderServices, logs: renderLogs, system: renderSystem };
 
   async function fillVersions(id, pkg) {
     const sel = document.getElementById(id);
@@ -339,12 +393,24 @@
       }
       case 'install-php-dlg':
       case 'install-node-dlg': {
-        const id = act.endsWith('php-dlg') ? 'p-php' : 'p-node';
-        const sel = document.getElementById(id) || document.getElementById(act.endsWith('php-dlg') ? 'r-php' : 'r-node');
-        const v = sel?.value;
-        if (!v) return toast('No hay versión seleccionada', 'err');
-        return run(act.endsWith('php-dlg') ? 'install-php' : 'install-node', { version: v }, `Instalando ${v}`);
+        const isPHP = act.endsWith('php-dlg');
+        const id = isPHP ? 'p-php' : 'p-node';
+        const sel = document.getElementById(id) || document.getElementById(isPHP ? 'r-php' : 'r-node');
+        const v = sel?.value || '';
+        const label = v || (isPHP ? 'última PHP' : 'último LTS');
+        return run(isPHP ? 'install-php' : 'install-node', { version: v }, `Instalando ${label}`);
       }
+      case 'install-default-db':
+        return run('ensure-database', null, 'Instalando MariaDB');
+      case 'install-db': {
+        const sel = document.getElementById(`db-ver-${payload.id}`);
+        const version = sel?.value || '';
+        return run('install-service', { id: payload.id, version, port: 0 }, `Instalando ${payload.id} ${version || '(última)'}`);
+      }
+      case 'db-default':
+        return run('db-default', payload, `${payload.id} como base de datos predeterminada`);
+      case 'view-databases':
+        return setView('databases');
       case 'php-use': return run('php-use', payload, `PHP ${payload.minor} por defecto`);
       case 'node-default': return run('node-default', payload, `Node ${payload.version} por defecto`);
       case 'park': {

@@ -6,6 +6,7 @@ Lair ejecuta software real del usuario y modifica la configuración del sistema.
 
 - La confianza de los binarios **no depende del host**: todo se verifica con una firma Ed25519 cuya clave pública va embebida en el binario (`internal/assets/public.ed25519`). Un mirror comprometido no puede servir un artifact modificado.
 - La clave privada de desarrollo (`keys/private.ed25519`) **no se embebe ni se distribuye**. Sirve solo para firmar manifiestos de prueba. Una clave de producción debe custodiarse fuera del repositorio.
+- El catálogo embebido (`internal/assets/catalog.json`) y su copia en `catalog/` son un **ejemplo de desarrollo**: apuntan a URLs oficiales de proveedores con sus SHA-256 publicados, pero no son un feed de producción. Un mirror con un manifiesto firmado de serial mayor los sustituye automáticamente.
 - El daemon **nunca corre como root**. Se ejecuta como `lair@<usuario>` con `CAP_NET_BIND_SERVICE` únicamente (ambient capability) para enlazar 80/443. `NoNewPrivileges=yes` impide escalada posterior.
 - Todos los listeners están en `127.0.0.1`. No hay sockets TCP remotos.
 

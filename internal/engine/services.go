@@ -309,6 +309,67 @@ func (e *Engine) CreateDatabase(id, name string) (string, error) {
 	return string(out), err
 }
 
+// DefaultDatabaseID is the database installed when Lair is set up for the first
+// time. MariaDB is the default because it is the usual Laravel companion.
+const DefaultDatabaseID = "mariadb"
+
+func isDatabaseService(id string) bool {
+	switch id {
+	case "mariadb", "mysql", "postgres":
+		return true
+	}
+	return false
+}
+
+// DefaultDatabase returns the configured default database id.
+func (e *Engine) DefaultDatabase() string {
+	c, err := e.Config.View()
+	if err == nil && isDatabaseService(c.Defaults["database"]) {
+		return c.Defaults["database"]
+	}
+	return DefaultDatabaseID
+}
+
+// SetDefaultDatabase marks an installed database service as the default used
+// by new Laravel projects.
+func (e *Engine) SetDefaultDatabase(id string) error {
+	if !isDatabaseService(id) {
+		return fmt.Errorf("%q is not a database service", id)
+	}
+	if len(e.installedServiceVersions(id)) == 0 {
+		return fmt.Errorf("%s is not installed", id)
+	}
+	return e.Config.Update(func(c *config.Config) error {
+		c.Defaults["database"] = id
+		return nil
+	})
+}
+
+// EnsureDefaultDatabase installs the default database when none is installed
+// yet. It is deliberately idempotent: repeated `lair install` runs never
+// re-download MariaDB. The returned job may be nil when nothing was needed.
+func (e *Engine) EnsureDefaultDatabase(ctx context.Context) (*installer.Job, error) {
+	id := e.DefaultDatabase()
+	for _, candidate := range []string{id, "mariadb", "mysql", "postgres"} {
+		if len(e.installedServiceVersions(candidate)) > 0 {
+			if candidate != id {
+				_ = e.Config.Update(func(c *config.Config) error {
+					c.Defaults["database"] = candidate
+					return nil
+				})
+			}
+			return nil, nil
+		}
+	}
+	if err := e.Config.Update(func(c *config.Config) error {
+		c.Defaults["database"] = id
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return e.InstallService(ctx, id, "", 0)
+}
+
 func serviceKnown(id string) bool {
 	for _, known := range services.IDs() {
 		if known == id {

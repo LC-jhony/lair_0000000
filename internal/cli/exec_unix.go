@@ -5,15 +5,15 @@ package cli
 import (
 	"os"
 	"syscall"
+
+	"github.com/mattn/go-isatty"
 )
 
-// isTerminal reports whether f is a character device (a TTY).
+// isTerminal reports whether f is an interactive TTY. A plain character-device
+// check is not enough: /dev/null is a character device too, and a TUI started
+// there fails while creating Bubble Tea's input reader.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
 
 // execBinary replaces the current process with the resolved binary. argv[0] is

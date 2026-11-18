@@ -248,15 +248,47 @@ func (e *Engine) PHPUse(minor string) error {
 	})
 }
 
-// InstallNode installs a Node version and returns the job.
+// LatestLTS returns the newest LTS version of a package for this platform, or
+// "" when the catalog does not flag any LTS release.
+func (e *Engine) LatestLTS(pkg string) string {
+	available, err := e.available(pkg)
+	if err != nil {
+		return ""
+	}
+	mf, err := e.manifest()
+	if err != nil {
+		return ""
+	}
+	for _, v := range available {
+		if mf.LTSOf(pkg, v, app.Platform()) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// InstallNode installs a Node version and returns the job. With no version (or
+// "lts") it selects the newest LTS release in the signed catalog, matching what
+// `nvm install --lts` would do.
 func (e *Engine) InstallNode(ctx context.Context, request string) (*installer.Job, error) {
 	available, err := e.available("node")
 	if err != nil {
 		return nil, err
 	}
-	picked, err := version.ExactOrLatest(request, available)
-	if err != nil {
-		return nil, err
+	picked := request
+	if request == "" || strings.EqualFold(request, "lts") || strings.EqualFold(request, "latest-lts") {
+		picked = e.LatestLTS("node")
+		if picked == "" {
+			if len(available) == 0 {
+				return nil, fmt.Errorf("no Node versions available in the catalog")
+			}
+			picked = available[0]
+		}
+	} else {
+		picked, err = version.ExactOrLatest(request, available)
+		if err != nil {
+			return nil, err
+		}
 	}
 	art, err := e.artifact("node", picked)
 	if err != nil {

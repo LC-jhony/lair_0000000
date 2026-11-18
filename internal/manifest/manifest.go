@@ -29,6 +29,7 @@ type Artifact struct {
 	Size       int64             `json:"size"`
 	Published  time.Time         `json:"published"`
 	Prerelease bool              `json:"prerelease"`
+	LTS        string            `json:"lts,omitempty"` // e.g. Node's "Lithium"; empty for non-LTS builds
 	Yanked     map[string]string `json:"yanked,omitempty"`
 }
 
@@ -53,6 +54,16 @@ func (m *Manifest) Get(pkg, version, platform string) (Artifact, bool) {
 	}
 	a, ok := platforms[platform]
 	return a, ok
+}
+
+// LTSOf returns the long-term-support codename declared for one build, or ""
+// when the version is not an LTS release (Node) or does not use LTS lines.
+func (m *Manifest) LTSOf(pkg, version, platform string) string {
+	a, ok := m.Get(pkg, version, platform)
+	if !ok {
+		return ""
+	}
+	return a.LTS
 }
 
 // Versions returns the available non-yanked versions for a package/platform.

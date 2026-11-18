@@ -69,11 +69,11 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 	add(ActionJob, func(_ context.Context, raw json.RawMessage) (any, error) {
 		var req JobRequest
 		decode(raw, &req)
-		job, ok := e.Installer.Job(req.ID)
+		status, ok := e.Installer.JobStatus(req.ID)
 		if !ok {
 			return nil, fmt.Errorf("no job %q", req.ID)
 		}
-		return job.Status(), nil
+		return status, nil
 	})
 	add(ActionJobs, func(context.Context, json.RawMessage) (any, error) { return e.Installer.List(), nil })
 	add(ActionJobCancel, func(_ context.Context, raw json.RawMessage) (any, error) {
@@ -135,6 +135,21 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 			return nil, fmt.Errorf("%v: %s", err, out)
 		}
 		return TextResult{Text: out}, nil
+	})
+	add(ActionEnsureDatabase, func(ctx context.Context, _ json.RawMessage) (any, error) {
+		job, err := e.EnsureDefaultDatabase(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if job == nil {
+			return map[string]bool{"already_installed": true}, nil
+		}
+		return job.Status(), nil
+	})
+	add(ActionDBDefault, func(_ context.Context, raw json.RawMessage) (any, error) {
+		var req DBDefaultRequest
+		decode(raw, &req)
+		return nil, e.SetDefaultDatabase(req.ID)
 	})
 	add(ActionPark, func(_ context.Context, raw json.RawMessage) (any, error) {
 		var req PathRequest
