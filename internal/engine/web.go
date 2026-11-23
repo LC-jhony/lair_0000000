@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/lair-sh/lair/internal/config"
 	"github.com/lair-sh/lair/internal/php"
@@ -218,8 +219,7 @@ func (e *Engine) syncWeb() {
 // applyWebToServer mirrors persisted settings into the embedded Go server so
 // its listeners use the same ports, domain and bind address as config.json.
 func (e *Engine) applyWebToServer(s config.WebSettings) {
-	e.Web.HTTPPort, e.Web.HTTPSPort = s.HTTPPort, s.HTTPSPort
-	e.Web.Domain, e.Web.Bind = s.Domain, s.Bind
+	e.Web.SetConfig(s.HTTPPort, s.HTTPSPort, s.Bind, s.Domain)
 }
 
 // rollbackWeb restores both the persisted settings and the in-memory server
@@ -278,6 +278,13 @@ func (e *Engine) StartWeb() error {
 	e.webControlMu.Lock()
 	defer e.webControlMu.Unlock()
 	s := e.WebSettings()
+	if e.Web.HasOverrides() {
+		// CLI flags (--http-port, --https-port, --domain, ...) were applied by
+		// daemon.Defaults before StartWeb. They win over persisted settings for
+		// this run.
+		httpPort, httpsPort, bind, domain := e.Web.Config()
+		s.HTTPPort, s.HTTPSPort, s.Bind, s.Domain = httpPort, httpsPort, bind, domain
+	}
 	e.applyWebToServer(s)
 	if err := e.preflightWebPorts(s); err != nil {
 		advised := webBindAdvice(err, e.webBinary())
@@ -351,11 +358,23 @@ func (e *Engine) WebControl(ctx context.Context, req WebRequest) (WebResult, err
 		return WebResult{}, err
 	}
 	s = newSettings
-	e.applyWebToServer(s)
 	if err := e.syncVHosts(s); err != nil {
 		e.rollbackWeb(previous)
 		e.setWebState("", err.Error())
 		return WebResult{}, err
+	}
+	portsChanged := s.HTTPPort != previous.HTTPPort || s.HTTPSPort != previous.HTTPSPort || s.Bind != previous.Bind
+	e.applyWebToServer(s)
+	if portsChanged {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := e.Web.Reconfigure(ctx)
+		cancel()
+		if err != nil {
+			// Persistence succeeded; a port conflict only means the running
+			// listeners keep the old bind. Surface it as a warning instead of
+			// rolling back the user's explicit configuration.
+			e.setWebState("los cambios de puerto se aplicarán al reiniciar: "+err.Error(), "")
+		}
 	}
 	e.setWebState("", "")
 	return WebResult{Web: e.WebStatus()}, nil

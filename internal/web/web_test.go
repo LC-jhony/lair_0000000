@@ -16,7 +16,7 @@ import (
 
 func TestRouterMatch(t *testing.T) {
 	r := NewRouter()
-	if err := r.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm-acme.sock"}); err != nil {
+	if err := r.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm-acme.sock", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	s, name, ok := r.Match("acme.test:443")
@@ -40,7 +40,7 @@ func TestRouterMatch(t *testing.T) {
 }
 
 func TestFastCGIParams(t *testing.T) {
-	site := Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock"}
+	site := Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock", Enabled: true}
 	req := httptest.NewRequest(http.MethodPost, "http://acme.test/foo?a=1", strings.NewReader("x=1"))
 	p := FastCGIParams(site, "www.acme.test", req)
 	if p["SCRIPT_FILENAME"] != filepath.Join("/srv/acme", "public", "index.php") {
@@ -89,7 +89,7 @@ func TestHandlerProxiesToFPM(t *testing.T) {
 	}()
 
 	s := NewServer(filepath.Join(dir, "certs"), "test")
-	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: sock}); err != nil {
+	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: sock, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://acme.test/foo", nil)
@@ -104,7 +104,7 @@ func TestHandlerProxiesToFPM(t *testing.T) {
 func TestGetCertificate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "certs")
 	s := NewServer(dir, "test")
-	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock"}); err != nil {
+	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	cert, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "www.acme.test"})
@@ -146,7 +146,7 @@ func TestGetCertificateRejectsUnparkedSNI(t *testing.T) {
 		t.Fatalf("unparked host has a certificate: %v", err)
 	}
 	// After parking, the same SNI works and is cached.
-	if err := s.Router.Add(Site{Name: "ghost.test", Root: "/srv/ghost", PHPSocket: "/run/fpm.sock"}); err != nil {
+	if err := s.Router.Add(Site{Name: "ghost.test", Root: "/srv/ghost", PHPSocket: "/run/fpm.sock", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "ghost.test"})
@@ -221,7 +221,7 @@ func TestPHPFStderrIsNotServed(t *testing.T) {
 		writeRec(conn, 3, end)
 	}()
 	s := NewServer(filepath.Join(dir, "certs"), "test")
-	s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: sock})
+	s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: sock, Enabled: true})
 	req := httptest.NewRequest(http.MethodGet, "http://acme.test/index.php", nil)
 	req.Host = "acme.test"
 	rr := httptest.NewRecorder()

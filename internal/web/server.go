@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -38,6 +39,14 @@ type Server struct {
 	httpServer  *http.Server
 	httpsServer *http.Server
 
+	// cfgMu protects the listener settings, which may change at runtime via
+	// WebControl. Start and getCertificate always read a snapshot.
+	// overridden is set when SetConfig is called before Start, e.g. by CLI
+	// flags. StartWeb must honour those values instead of re-reading config.json.
+	overridden bool
+
+	cfgMu sync.RWMutex
+
 	certMu sync.Mutex
 	certs  map[string]*tls.Certificate // canonical host -> certificate
 }
@@ -54,11 +63,59 @@ func NewServer(certsDir, domain string) *Server {
 	}
 }
 
+// Config returns a consistent snapshot of the listener settings.
+func (s *Server) Config() (httpPort, httpsPort int, bind, domain string) {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.HTTPPort, s.HTTPSPort, s.Bind, s.Domain
+}
+
+// SetConfig replaces the listener settings. It does not touch running
+// listeners; call Reconfigure to apply changes to ports or bind address.
+func (s *Server) SetConfig(httpPort, httpsPort int, bind, domain string) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	s.HTTPPort, s.HTTPSPort, s.Bind, s.Domain = httpPort, httpsPort, bind, domain
+	s.overridden = true
+}
+
+// HasOverrides reports whether listener settings were injected before start.
+func (s *Server) HasOverrides() bool {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.overridden
+}
+
+// ClearCertCache drops cached certificates after site aliases change, so the
+// next handshake issues a certificate containing the new SANs.
+func (s *Server) ClearCertCache() {
+	s.certMu.Lock()
+	defer s.certMu.Unlock()
+	s.certs = map[string]*tls.Certificate{}
+}
+
+// Reconfigure stops the current listeners and starts them with new settings.
+// It is the implementation behind the daemon's "hot reload" of web settings.
+func (s *Server) Reconfigure(ctx context.Context) error {
+	if err := s.Shutdown(ctx); err != nil {
+		return err
+	}
+	return s.Start()
+}
+
 // Handler implements http.Handler.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	site, serverName, ok := s.Router.Match(r.Host)
 	if !ok {
 		http.Error(w, "lair: unknown site "+r.Host, http.StatusNotFound)
+		return
+	}
+	// A site whose front controller is missing or misplaced is served a small
+	// status page instead of being proxied to a broken FPM pool.
+	if site.RootState != "" && site.RootState != "ok" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, notConfiguredPage(site))
 		return
 	}
 
@@ -67,7 +124,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	docRoot := filepath.Join(site.Root, "public")
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		if rel := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/"); rel != "" {
-			if name := filepath.Base(rel); name != "index.php" && strings.Contains(name, ".") {
+			// Every .php file is a dynamic route, not a static asset. Serving
+			// public/foo.php as text would leak its source. index.php and any
+			// other front controller must reach PHP-FPM.
+			if !strings.EqualFold(filepath.Ext(rel), ".php") {
 				if file, ok := safeStaticFile(docRoot, rel); ok {
 					http.ServeFile(w, r, file)
 					return
@@ -80,7 +140,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if dial == nil {
 		dial = net.DialTimeout
 	}
-	conn, err := dial("unix", site.PHPSocket, s.timeout())
+	network, addr := "unix", site.PHPSocket
+	if site.PHPAddr != "" {
+		network, addr = "tcp", site.PHPAddr
+	}
+	conn, err := dial(network, addr, s.timeout())
 	if err != nil {
 		http.Error(w, "lair: PHP-FPM unavailable: "+err.Error(), http.StatusBadGateway)
 		return
@@ -107,6 +171,21 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(resp.Body)
 	// PHP-FPM stderr is deliberately not written to the HTTP response: it can
 	// contain credentials, absolute paths and stack traces.
+}
+
+// notConfiguredPage is the built-in status page for a parked site that has no
+// front controller yet. It only shows the host and the expected project path:
+// no LAIR_HOME paths, tokens or environment values.
+func notConfiguredPage(site Site) string {
+	host := html.EscapeString(site.Name)
+	expected := html.EscapeString(filepath.Join(site.Root, "public", "index.php"))
+	return `<!doctype html><html lang="es"><head><meta charset="utf-8">` +
+		`<meta name="viewport" content="width=device-width,initial-scale=1">` +
+		`<title>Sitio no configurado</title></head><body>` +
+		`<h1>Sitio no configurado</h1>` +
+		`<p>El host <strong>` + host + `</strong> está registrado en Lair, pero todavía no tiene una aplicación PHP accesible.</p>` +
+		`<p>Ruta esperada: <code>` + expected + `</code></p>` +
+		`</body></html>`
 }
 
 // safeStaticFile resolves a requested relative path under docRoot. Both the
@@ -163,7 +242,8 @@ func (s *Server) timeout() time.Duration {
 // cached per canonical host to avoid re-reading/re-signing on every handshake.
 func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	host := pki.NormalizeHost(stripPort(hello.ServerName))
-	domain := pki.NormalizeHost(s.Domain)
+	_, _, _, configuredDomain := s.Config()
+	domain := pki.NormalizeHost(configuredDomain)
 	if host == "" || domain == "" || (host != domain && !strings.HasSuffix(host, "."+domain)) {
 		return nil, fmt.Errorf("refusing to issue certificate for %q", host)
 	}
@@ -181,15 +261,26 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 	if s.certs == nil {
 		s.certs = map[string]*tls.Certificate{}
 	}
-	if cert := s.certs[host]; cert != nil {
-		return cert, nil
-	}
+	// Only the canonical host is cached: caching arbitrary SNI values lets any
+	// subdomain grow the map without bound.
 	if cert := s.certs[canonical]; cert != nil {
 		return cert, nil
 	}
 	sans := pki.SANsFor(canonical, domain)
 	if len(sans) == 0 {
 		return nil, fmt.Errorf("invalid parked site %q for domain %q", site.Name, domain)
+	}
+	seen := make(map[string]bool, len(sans)+len(site.Domains))
+	for _, name := range sans {
+		seen[pki.NormalizeHost(name)] = true
+	}
+	// Aliases registered on the site must be part of the certificate, otherwise
+	// HTTPS on a configured domain fails with a hostname mismatch.
+	for _, alias := range site.Domains {
+		if alias = pki.NormalizeHost(alias); alias != "" && !seen[alias] {
+			sans = append(sans, alias)
+			seen[alias] = true
+		}
 	}
 	certPath, keyPath, err := pki.IssueSite(s.CertsDir, canonical, sans...)
 	if err != nil {
@@ -200,7 +291,6 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 		return nil, err
 	}
 	s.certs[canonical] = &cert
-	s.certs[host] = &cert
 	return &cert, nil
 }
 
@@ -208,13 +298,14 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 // created; use Shutdown to stop. The bind address comes from config (loopback
 // by default); 0.0.0.0 is an explicit opt-in that exposes sites to the LAN.
 func (s *Server) Start() error {
-	if c := services.CheckPort(s.HTTPPort); c != nil {
+	httpPort, httpsPort, configuredBind, _ := s.Config()
+	if c := services.CheckPort(httpPort); c != nil {
 		return fmt.Errorf("cannot start HTTP: %s", c.String())
 	}
-	if c := services.CheckPort(s.HTTPSPort); c != nil {
+	if c := services.CheckPort(httpsPort); c != nil {
 		return fmt.Errorf("cannot start HTTPS: %s", c.String())
 	}
-	bind := strings.TrimSpace(s.Bind)
+	bind := strings.TrimSpace(configuredBind)
 	if bind == "" {
 		bind = "127.0.0.1"
 	}
@@ -222,12 +313,12 @@ func (s *Server) Start() error {
 		return fmt.Errorf("invalid bind address %q", bind)
 	}
 	s.httpServer = &http.Server{
-		Addr:              net.JoinHostPort(bind, strconv.Itoa(s.HTTPPort)),
+		Addr:              net.JoinHostPort(bind, strconv.Itoa(httpPort)),
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.httpsServer = &http.Server{
-		Addr:              net.JoinHostPort(bind, strconv.Itoa(s.HTTPSPort)),
+		Addr:              net.JoinHostPort(bind, strconv.Itoa(httpsPort)),
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{
@@ -236,14 +327,14 @@ func (s *Server) Start() error {
 		},
 	}
 	errCh := make(chan error, 2)
-	if s.HTTPPort > 0 {
+	if httpPort > 0 {
 		go func() {
 			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				errCh <- err
 			}
 		}()
 	}
-	if s.HTTPSPort > 0 {
+	if httpsPort > 0 {
 		go func() {
 			if err := s.httpsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 				errCh <- err

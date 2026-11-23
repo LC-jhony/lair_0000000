@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lair-sh/lair/internal/app"
 	"github.com/lair-sh/lair/internal/php"
@@ -17,13 +18,14 @@ import (
 // from the site's isolation, then the global default, then the newest installed
 // build. Pools are idempotent and stop when their site disappears.
 func (e *Engine) syncFPM() {
+	c, err := e.Config.View()
+	if err != nil {
+		return
+	}
 	// Windows has no php-fpm: the web layer uses php-cgi worker pools on
 	// loopback ports (see php.CGIPort) instead of unix sockets.
 	if strings.HasPrefix(app.Platform(), "windows-") {
-		return
-	}
-	c, err := e.Config.View()
-	if err != nil {
+		e.syncWindowsCGI(c)
 		return
 	}
 	installed, _ := php.Installed(e.Paths)
@@ -34,7 +36,7 @@ func (e *Engine) syncFPM() {
 	desired := map[string]bool{}
 	writtenGlobal := map[string]bool{}
 	for name, site := range c.Sites {
-		if site.Path == "" {
+		if site.Path == "" || !site.Enabled {
 			continue
 		}
 		minor := site.PHP
@@ -72,14 +74,22 @@ func (e *Engine) syncFPM() {
 		}
 		id := "fpm-" + name
 		desired[id] = true
-		key := bin + "|" + confPath + "|" + minor
+		// Include the dumps capture flag so toggling capture restarts the pool
+		// and PHP actually loads the new auto_prepend_file.
+		key := fmt.Sprintf("%s|%s|%s|capture=%t", bin, confPath, minor, c.Dumps.Capturing)
 		if err := e.FPM.Start(id, key, bin, confPath, site.Path, sock, php.Env(info, e.Paths)); err != nil {
 			fmt.Fprintf(os.Stderr, "lair: php-fpm %s: %v\n", name, err)
 		}
 	}
 	for _, id := range e.FPM.IDs() {
 		if !desired[id] {
-			e.FPM.Stop(id)
+			// Pass the socket so a stopped/disabled site does not leave an
+			// orphan socket behind until the next pool with that name starts.
+			if sock, err := e.Paths.SocketPath(id); err == nil {
+				e.FPM.Stop(id, sock)
+			} else {
+				e.FPM.Stop(id)
+			}
 		}
 	}
 }
@@ -104,19 +114,28 @@ func NewFPMManager(logDir string) *FPMManager {
 	return &FPMManager{pools: map[string]*fpmPool{}, logDir: logDir}
 }
 
-// Start launches a pool unless an identical one is already running.
+// stopPool cancels a pool and waits for its process, with a bounded wait so a
+// stuck php-fpm cannot freeze shutdown or a replacement start.
+func (m *FPMManager) stopPool(pool *fpmPool) {
+	pool.cancel()
+	select {
+	case <-pool.done:
+	case <-time.After(3 * time.Second):
+	}
+}
+
+// Start launches a pool unless an identical one is already running. The whole
+// check-and-launch is serialized to avoid two callers starting the same pool.
 func (m *FPMManager) Start(id, key, bin, configPath, workDir, socket string, env []string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	if current, ok := m.pools[id]; ok {
 		if current.key == key {
-			m.mu.Unlock()
 			return nil
 		}
-		m.mu.Unlock()
-		m.Stop(id)
-		return m.Start(id, key, bin, configPath, workDir, socket, env)
+		delete(m.pools, id)
+		m.stopPool(current)
 	}
-	m.mu.Unlock()
 
 	// A stale socket from a crashed pool must not block the new one.
 	_ = os.Remove(socket)
@@ -146,9 +165,7 @@ func (m *FPMManager) Start(id, key, bin, configPath, workDir, socket string, env
 		_ = logFile.Close()
 		close(done)
 	}()
-	m.mu.Lock()
 	m.pools[id] = &fpmPool{cancel: cancel, done: done, key: key}
-	m.mu.Unlock()
 	return nil
 }
 
@@ -161,8 +178,7 @@ func (m *FPMManager) Stop(id string, socket ...string) {
 	}
 	m.mu.Unlock()
 	if ok {
-		pool.cancel()
-		<-pool.done
+		m.stopPool(pool)
 	}
 	if len(socket) > 0 && socket[0] != "" {
 		_ = os.Remove(socket[0])

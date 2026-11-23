@@ -39,6 +39,7 @@ type Engine struct {
 	Web         *web.Server
 	Supervisors *SupervisorRegistry
 	FPM         *FPMManager
+	CGI         *CGIManager // Windows php-cgi worker pools
 
 	catalogMu sync.Mutex
 
@@ -82,7 +83,9 @@ func New(paths app.Paths, catalog *manifest.Catalog) (*Engine, error) {
 		Web:         web.NewServer(paths.Certs, "test"),
 		Supervisors: NewSupervisorRegistry(paths.Log),
 		FPM:         NewFPMManager(paths.Log),
+		CGI:         NewCGIManager(),
 	}
+	e.Installer.SetOnDone(e.refreshShims)
 	s := e.WebSettings()
 	e.Web.HTTPPort, e.Web.HTTPSPort, e.Web.Domain, e.Web.Bind = s.HTTPPort, s.HTTPSPort, s.Domain, s.Bind
 	e.reloadSites()
@@ -94,20 +97,36 @@ func (e *Engine) reloadSites() {
 	if err != nil {
 		return
 	}
+	seen := map[string]bool{}
 	for name, site := range c.Sites {
 		if site.Path == "" {
 			continue
 		}
+		seen[name] = true
 		sock, err := e.Paths.SocketPath("fpm-" + name)
 		if err != nil {
 			continue
+		}
+		// Windows uses TCP loopback php-cgi workers instead of unix sockets.
+		phpAddr := ""
+		if strings.HasPrefix(app.Platform(), "windows-") {
+			minor := site.PHP
+			if minor == "" {
+				minor = c.Defaults["php"]
+			}
+			if parsed, perr := version.Parse(minor); perr == nil {
+				minor = parsed.MinorLine()
+			}
+			if port, perr := php.CGIPort(minor, false); perr == nil {
+				phpAddr = fmt.Sprintf("127.0.0.1:%d", port)
+			}
 		}
 		_, certErr := os.Stat(filepath.Join(e.Paths.Certs, name+".pem"))
 		// The descriptive fields are informational only: routing still uses
 		// name/root/php_socket/secure and the three version pins.
 		detail := e.siteDetail(c, name, site)
 		_ = e.Web.Router.Add(web.Site{
-			Name: name, Root: site.Path, PHPSocket: sock,
+			Name: name, Root: site.Path, PHPSocket: sock, PHPAddr: phpAddr,
 			Secure: certErr == nil, Enabled: site.Enabled,
 			PHP: site.PHP, Node: site.Node, Database: site.Database,
 			Type: detail.Type, Framework: detail.Framework,
@@ -118,6 +137,14 @@ func (e *Engine) reloadSites() {
 			URL: detail.URL,
 		})
 	}
+	for _, registered := range e.Web.Router.List() {
+		if !seen[registered.Name] {
+			e.Web.Router.Remove(registered.Name)
+		}
+	}
+	// Aliases may have changed: cached certificates must be re-issued with the
+	// new SAN list on the next TLS handshake.
+	e.Web.ClearCertCache()
 	e.syncFPM()
 }
 
@@ -138,10 +165,8 @@ type Status struct {
 
 // Status collects current state from disk and the config store.
 func (e *Engine) Status() (Status, error) {
-	// Projects may have been created with `lair new` or with a plain
-	// `laravel new` inside the projects folder. Discover them on every status
-	// snapshot so both the desktop and the TUI show them automatically.
-	_ = e.SyncProjectDirs()
+	// Status is a read-only snapshot: project discovery is a startup/action
+	// concern (see daemon.NewRuntime), not something a shim should trigger.
 	c, err := e.Config.View()
 	if err != nil {
 		return Status{}, err
@@ -275,9 +300,8 @@ func (e *Engine) InstallPHP(ctx context.Context, request string) (*installer.Job
 	}
 	parsed, _ := version.Parse(picked)
 	minor := parsed.MinorLine()
-	if strings.HasPrefix(app.Platform(), "windows-") && e.extPackBuild(minor) == "" {
-		return nil, fmt.Errorf("no complete PHP %s build for %s: the extension pack is not published for this minor", minor, app.Platform())
-	}
+	// Windows builds from windows.php.net ship their own ext/ directory. A
+	// separate php-exts pack is optional: it is merged on top when published.
 	dest := filepath.Join(e.Paths.PHP, minor)
 	caFile := filepath.Join(e.Paths.Certs, "ca.pem")
 	extPack := e.extPackBuild(minor)
@@ -360,7 +384,9 @@ func pickPHP(request string, available []string) (string, error) {
 // ship both the CLI and FPM.
 func phpExpected() []string {
 	if strings.HasPrefix(app.Platform(), "windows-") {
-		return []string{"bin/php.exe", "bin/php-cgi.exe"}
+		// The official zip keeps executables at the archive root; the staging
+		// merge moves them into bin/ before the version probe runs.
+		return []string{"php.exe", "php-cgi.exe"}
 	}
 	return []string{"bin/php", "sbin/php-fpm"}
 }
@@ -499,14 +525,15 @@ func (e *Engine) installNodeFromCatalog(ctx context.Context, request string) (*i
 			}
 		}
 		if !found {
+			// An existing nvm installation is the preferred source for exact
+			// versions it already manages: no network round trip and the same
+			// tool the user chose. Catalog/major installs still use the signed
+			// manifest path above.
+			if nvm.Available() {
+				return e.installNodeWithNVM(ctx, request)
+			}
 			art, err := nodepkg.OfficialArtifact(ctx, e.HTTP, exact, app.Platform())
 			if err != nil {
-				// Compatibility: when offline and an nvm installation already
-				// exists on this machine, let nvm satisfy an exact request.
-				// New default/major installs still come from the signed catalog.
-				if nvm.Available() {
-					return e.installNodeWithNVM(ctx, request)
-				}
 				return nil, fmt.Errorf("node %s is not in the signed catalog and could not be verified from nodejs.org: %w", exact, err)
 			}
 			return e.installNodeArtifact(ctx, exact, art)
@@ -563,7 +590,6 @@ func (e *Engine) installNodeArtifact(ctx context.Context, picked string, art man
 			return e.Config.Update(func(c *config.Config) error {
 				if c.Defaults["node"] == "" {
 					c.Defaults["node"] = picked
-					_ = nodepkg.EnsureGlobal(e.Paths, major)
 				}
 				return nil
 			})

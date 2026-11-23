@@ -90,6 +90,10 @@ func New(cfg RuntimeConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Project discovery mutates config and the filesystem. Do it once at daemon
+	// startup instead of from every read-only Status() call (including shims).
+	_ = eng.SyncProjectDirs()
+
 	// Explicit --http-port/--https-port flags override the persisted settings
 	// for this daemon run; with no flags config.json remains authoritative.
 	settings := eng.WebSettings()
@@ -99,8 +103,7 @@ func New(cfg RuntimeConfig) (*Runtime, error) {
 	if cfg.HTTPSPort != 443 {
 		settings.HTTPSPort = cfg.HTTPSPort
 	}
-	eng.Web.HTTPPort, eng.Web.HTTPSPort = settings.HTTPPort, settings.HTTPSPort
-	eng.Web.Bind, eng.Web.Domain = settings.Bind, settings.Domain
+	eng.Web.SetConfig(settings.HTTPPort, settings.HTTPSPort, settings.Bind, settings.Domain)
 	r := &Runtime{cfg: cfg, Engine: eng}
 	// The engine owns the router and the web settings from config.json. Using
 	// its server directly keeps site registration and the listener in sync.
@@ -131,6 +134,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	r.stop = cancel
 	defer cancel()
 	defer r.Engine.FPM.StopAll()
+	defer r.Engine.CGI.StopAll()
 
 	// The catalog may have been started by the caller; starting it again is
 	// safe (LoadFromCache is idempotent and the refresh loop honours ctx).

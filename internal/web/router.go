@@ -20,11 +20,14 @@ type Site struct {
 	Name      string `json:"name"`       // canonical host, e.g. "acme.test"
 	Root      string `json:"root"`       // project root (contains public/)
 	PHPSocket string `json:"php_socket"` // unix socket of this site's FPM pool
-	Secure    bool   `json:"secure"`     // a local CA certificate has been issued for this host
-	Enabled   bool   `json:"enabled"`    // false keeps the site registered but removes its vhost
-	PHP       string `json:"php,omitempty"`
-	Node      string `json:"node,omitempty"`
-	Database  string `json:"database,omitempty"`
+	// PHPAddr is the TCP address of a php-cgi worker pool on Windows. When set,
+	// the server dials TCP instead of a unix socket.
+	PHPAddr  string `json:"php_addr,omitempty"`
+	Secure   bool   `json:"secure"`  // a local CA certificate has been issued for this host
+	Enabled  bool   `json:"enabled"` // false keeps the site registered but removes its vhost
+	PHP      string `json:"php,omitempty"`
+	Node     string `json:"node,omitempty"`
+	Database string `json:"database,omitempty"`
 
 	Type            string   `json:"type,omitempty"`
 	Framework       string   `json:"framework,omitempty"`
@@ -41,30 +44,52 @@ type Site struct {
 	URL             string   `json:"url,omitempty"`
 }
 
-// Router maps request hosts to sites in a concurrency-safe way.
+// Router maps request hosts to sites in a concurrency-safe way. `sites` is
+// keyed by canonical name; `hosts` maps every registered host (canonical plus
+// aliases) back to that name so aliases really route and can be removed again.
 type Router struct {
 	mu    sync.RWMutex
 	sites map[string]Site
+	hosts map[string]string
 }
 
 // NewRouter creates an empty router.
-func NewRouter() *Router { return &Router{sites: map[string]Site{}} }
+func NewRouter() *Router {
+	return &Router{sites: map[string]Site{}, hosts: map[string]string{}}
+}
 
-// Add registers or replaces a site.
+func normalizeHost(host string) string {
+	return strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+}
+
+// Add registers or replaces a site and its aliases. A disabled site stays in
+// the table (so the UI still sees it) but Match never routes to it.
 func (r *Router) Add(site Site) error {
 	if site.Name == "" || site.Root == "" || site.PHPSocket == "" {
 		return fmt.Errorf("site name, root and php socket are required")
 	}
+	name := normalizeHost(site.Name)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.sites[strings.ToLower(strings.TrimSuffix(site.Name, "."))] = site
+	for host, canonical := range r.hosts {
+		if canonical == name {
+			delete(r.hosts, host)
+		}
+	}
+	r.sites[name] = site
+	r.hosts[name] = name
+	for _, alias := range site.Domains {
+		if alias = normalizeHost(alias); alias != "" && alias != name {
+			r.hosts[alias] = name
+		}
+	}
 	return nil
 }
 
 // SetSecure flips only the TLS flag of an existing site, keeping its root and
 // FPM socket untouched.
 func (r *Router) SetSecure(name string, secure bool) {
-	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	name = normalizeHost(name)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if site, ok := r.sites[name]; ok {
@@ -75,9 +100,15 @@ func (r *Router) SetSecure(name string, secure bool) {
 
 // Remove deletes a site.
 func (r *Router) Remove(name string) {
+	name = normalizeHost(name)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.sites, strings.ToLower(strings.TrimSuffix(name, ".")))
+	delete(r.sites, name)
+	for host, canonical := range r.hosts {
+		if canonical == name || host == name {
+			delete(r.hosts, host)
+		}
+	}
 }
 
 // List returns all sites sorted by name.
@@ -95,22 +126,30 @@ func (r *Router) List() []Site {
 // site. A subdomain like "www.acme.test" matches the parked "acme.test" and
 // carries the subdomain in the SERVER_NAME param.
 func (r *Router) Match(host string) (Site, string, bool) {
-	host = strings.ToLower(stripPort(host))
-	host = strings.TrimSuffix(host, ".")
+	host = normalizeHost(stripPort(host))
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if s, ok := r.sites[host]; ok {
-		return s, host, true
-	}
-	// Walk up parent domains to find a parked site.
-	labels := strings.Split(host, ".")
-	for i := 1; i < len(labels); i++ {
-		candidate := strings.Join(labels[i:], ".")
-		if s, ok := r.sites[candidate]; ok {
-			return s, host, true
+	name, found := r.hosts[host]
+	if !found {
+		// Walk up parent domains to find a parked site (www.<site>.test).
+		labels := strings.Split(host, ".")
+		for i := 1; i < len(labels); i++ {
+			candidate := strings.Join(labels[i:], ".")
+			if canonical, ok := r.hosts[candidate]; ok {
+				name, found = canonical, true
+				break
+			}
 		}
 	}
-	return Site{}, "", false
+	if !found {
+		return Site{}, "", false
+	}
+	site, ok := r.sites[name]
+	if !ok || !site.Enabled {
+		// Disabled sites stay registered for the UI but are never published.
+		return Site{}, "", false
+	}
+	return site, host, true
 }
 
 func stripPort(host string) string {

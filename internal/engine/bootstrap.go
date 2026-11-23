@@ -109,6 +109,22 @@ func (e *Engine) EnsureShims(lairBinary, home string) (string, error) {
 	return e.Paths.Bin, nil
 }
 
+// refreshShims keeps the shims and PATH snippets in sync with installed tools.
+// It runs after every successful installer job so clients of a newly installed
+// service are immediately available in a fresh shell.
+func (e *Engine) refreshShims() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	_ = shims.Generate(e.Paths.Bin, exe)
+	_ = shims.EnsureProfiles(home, e.Paths.Bin)
+}
+
 // Bootstrap performs the local (unprivileged) part of `lair install`:
 // shims, shell profile snippets, local CA and a verified Composer phar. The
 // privileged plan (systemd/polkit/resolved/CA trust) is rendered by the CLI

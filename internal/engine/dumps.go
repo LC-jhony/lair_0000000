@@ -148,6 +148,9 @@ func (e *Engine) DumpsControl(ctx context.Context, req DumpsRequest) (DumpsResul
 		if err := e.syncDumpsAgent(next.Capturing); err != nil {
 			return out, fmt.Errorf("sync dumps agent: %w", err)
 		}
+		// PHP-FPM reads php.ini/scan dirs at process start. Restart the pools
+		// so the new auto_prepend_file is actually loaded by the running site.
+		e.syncFPM()
 		out.Output = map[string]string{
 			"capture-on": "Captura activada", "capture-off": "Captura desactivada",
 			"options": "Opciones actualizadas",
@@ -416,7 +419,10 @@ if (!function_exists('lair_dumps_send')) {
         $cmd = PHP_VERSION_ID >= 70400 ? $argv : implode(' ', array_map('escapeshellarg', $argv));
         $desc = array(0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
         $pipes = array();
-        $proc = @proc_open($cmd, $desc, $pipes);
+        // FPM does not inherit the daemon's LAIR_HOME. Pass it explicitly so
+        // the child talks to the same data root and dumps token.
+        $env = array('LAIR_HOME' => $lairHome);
+        $proc = @proc_open($cmd, $desc, $pipes, null, $env);
         if (!is_resource($proc)) { return; }
         fclose($pipes[0]);
         stream_get_contents($pipes[1]);
