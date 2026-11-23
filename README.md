@@ -33,6 +33,7 @@ lair doctor                     # diagnóstico si algo no responde
 
 ## Índice
 
+0. [Instalación](#instalación)
 1. [Compilación y Makefile](#1-compilación-y-makefile)
 2. [Configuración](#2-configuración)
 3. [El comando `lair`](#3-el-comando-lair)
@@ -46,6 +47,102 @@ lair doctor                     # diagnóstico si algo no responde
 11. [Guía detallada de módulos](#11-guía-detallada-de-módulos)
 12. [Capturas de pantalla](#12-capturas-de-pantalla)
 13. [Más documentación](#13-más-documentación)
+
+---
+
+## Instalación
+
+### Binarios del release v1.0.0
+
+Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.0>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario.
+
+#### Linux x86_64 (amd64)
+
+```sh
+mkdir -p ~/.local/bin && cd /tmp
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/lair_1.0.0_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/SHA256SUMS
+grep ' lair_1.0.0_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
+tar -xzf lair_1.0.0_linux_amd64.tar.gz
+install -m 0755 lair ~/.local/bin/lair
+lair --help
+```
+
+En **Linux arm64**, sustituye `amd64` por `arm64` en el nombre del artefacto. En Debian/Ubuntu también puedes instalar el paquete:
+
+```sh
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/lair_1.0.0_amd64.deb
+sudo apt install ./lair_1.0.0_amd64.deb      # usa arm64 en Raspberry Pi
+```
+
+#### macOS (Apple Silicon / Intel)
+
+```sh
+mkdir -p ~/.local/bin && cd /tmp
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/lair_1.0.0_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/SHA256SUMS
+grep ' lair_1.0.0_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
+tar -xzf lair_1.0.0_darwin_arm64.tar.gz
+install -m 0755 lair ~/.local/bin/lair
+```
+
+Para Intel, usa `lair_1.0.0_darwin_amd64.tar.gz`.
+
+#### Windows (PowerShell)
+
+```powershell
+$asset = 'lair_1.0.0_windows_amd64.zip'
+$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.0'
+Invoke-WebRequest -Uri "$base/$asset" -OutFile $asset
+Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile SHA256SUMS
+$expected = (Select-String -Path SHA256SUMS -Pattern " $asset`$").Line.Split(' ')[0]
+if ((Get-FileHash $asset -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'SHA-256 no coincide' }
+Expand-Archive $asset -DestinationPath .
+$dir = "$HOME\.local\bin"
+New-Item -ItemType Directory -Force -Path $dir | Out-Null
+Move-Item lair.exe $dir -Force
+[Environment]::SetEnvironmentVariable('Path', "$env:Path;$dir", 'User')
+```
+
+Para ARM64 usa `lair_1.0.0_windows_arm64.zip`.
+
+### Desde el código fuente
+
+Necesitas Go 1.26+; el bundle de la TUI ya viene incrustado, pero `lair tui` necesita Node 22+ en tiempo de ejecución.
+
+```sh
+git clone https://github.com/LC-jhony/lair.git
+cd lair
+export PATH="$HOME/.local/go/bin:$PATH"   # si Go no está en el PATH
+make build
+mkdir -p ~/.local/bin && install -m 0755 lair ~/.local/bin/lair
+```
+
+### Configuración inicial (una sola vez)
+
+`lair install` crea shims, PATH, CA y descarga PHP, Node LTS y SQLite con barra de progreso. `LAIR_HOME` es opcional (por defecto `~/.local/share/lair`). Después **revisa** los scripts que genera y ejecútalos con elevación:
+
+```sh
+lair install
+
+# Linux con systemd
+sudo "$LAIR_HOME/setup-privileged.sh"
+sudo "$LAIR_HOME/trust-ca.sh" --add
+"$LAIR_HOME/trust-ca-user.sh" --add
+sudo systemctl enable --now "lair@$USER"
+
+# macOS: sustituye los cuatro comandos anteriores por
+sudo "$LAIR_HOME/setup-privileged.sh"
+
+# Windows (PowerShell elevado): sustituye por
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LAIR_HOME\setup-privileged.ps1"
+```
+
+Abre una terminal nueva para cargar el PATH y comprueba:
+
+```sh
+lair doctor && php -v && node -v && composer -V
+```
 
 ---
 
