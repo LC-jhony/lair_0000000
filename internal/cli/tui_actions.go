@@ -401,15 +401,14 @@ func (m *tuiModel) run(busy, label, action string, payload any) tea.Cmd {
 
 func (m *tuiModel) askDefault() (tea.Model, tea.Cmd) {
 	if m.pane == paneDatabases {
-		ids := make([]string, 0)
+		// SQLite is always available: it is a catalog CLI, not a supervised
+		// service, and is installed on first run. Offer it alongside the
+		// database engines that are actually installed.
+		ids := []string{"sqlite"}
 		for _, id := range []string{"mariadb", "mysql", "postgres"} {
 			if len(m.status.Services[id].Installed) > 0 {
 				ids = append(ids, id)
 			}
-		}
-		if len(ids) == 0 {
-			m.message = styleSubtle.Render("_no hay motores instalados_")
-			return m, nil
 		}
 		m.formText = ""
 		return m.openForm("defaultDB", m.selectField("Base de datos predeterminada", ids, &m.formText))

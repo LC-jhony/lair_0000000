@@ -3,18 +3,29 @@
 package supervisor
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/lair-sh/lair/internal/services"
 )
 
-type osProcess struct{ cmd *exec.Cmd }
+type osProcess struct {
+	cmd *exec.Cmd
+	log *os.File
+}
 
-func (p *osProcess) Wait() error { return p.cmd.Wait() }
+func (p *osProcess) Wait() error {
+	err := p.cmd.Wait()
+	if p.log != nil {
+		_ = p.log.Close()
+	}
+	return err
+}
 func (p *osProcess) PID() int {
 	if p.cmd.Process == nil {
 		return 0
@@ -38,7 +49,30 @@ func (p *osProcess) Signal(sig os.Signal) error {
 	return p.cmd.Process.Signal(sig)
 }
 
-func signalStop(p Process, _ services.Spec) error { return p.Signal(syscall.SIGTERM) }
+// signalStop honours the spec's declared shutdown command/signal. PostgreSQL,
+// for example, declares SIGINT (fast shutdown) and a pg_ctl -m fast command;
+// sending plain SIGTERM would wait for all client connections to close and a
+// `services stop` could hang on a busy site. Falls back to SIGTERM.
+func signalStop(p Process, spec services.Spec) error {
+	if len(spec.StopCmd) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, spec.StopCmd[0], spec.StopCmd[1:]...)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	sig := syscall.SIGTERM
+	switch spec.StopSignal {
+	case "SIGINT", "INT":
+		sig = syscall.SIGINT
+	case "SIGQUIT", "QUIT":
+		sig = syscall.SIGQUIT
+	case "SIGKILL", "KILL":
+		sig = syscall.SIGKILL
+	}
+	return p.Signal(sig)
+}
 
 // OSRunner starts services in their own process groups with logs on disk.
 type OSRunner struct{ LogDir string }
@@ -48,6 +82,7 @@ func (r *OSRunner) Start(spec services.Spec) (Process, error) {
 	cmd.Dir = spec.Dir
 	cmd.Env = append(os.Environ(), spec.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	proc := &osProcess{cmd: cmd}
 	if r.LogDir != "" {
 		if err := os.MkdirAll(r.LogDir, 0o755); err != nil {
 			return nil, err
@@ -58,9 +93,13 @@ func (r *OSRunner) Start(spec services.Spec) (Process, error) {
 		}
 		cmd.Stdout = f
 		cmd.Stderr = f
+		proc.log = f
 	}
 	if err := cmd.Start(); err != nil {
+		if proc.log != nil {
+			_ = proc.log.Close()
+		}
 		return nil, fmt.Errorf("start %s: %w", spec.ID, err)
 	}
-	return &osProcess{cmd: cmd}, nil
+	return proc, nil
 }

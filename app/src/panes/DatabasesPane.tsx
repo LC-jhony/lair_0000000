@@ -21,9 +21,9 @@ import { ServiceToggle } from './ServiceToggle';
 import type { PaneProps } from './types';
 import { useVersions } from './useVersions';
 
-const DB_IDS = ['mariadb', 'postgres'] as const;
-const DEFAULT_PORTS: Record<string, number> = { mariadb: 3306, postgres: 5432 };
-const LABELS: Record<string, string> = { mariadb: 'MariaDB', postgres: 'PostgreSQL' };
+const DB_IDS = ['mariadb', 'mysql', 'postgres'] as const;
+const DEFAULT_PORTS: Record<string, number> = { mariadb: 3306, mysql: 3307, postgres: 5432 };
+const LABELS: Record<string, string> = { mariadb: 'MariaDB', mysql: 'MySQL', postgres: 'PostgreSQL' };
 
 export function DatabasesPane({ state }: PaneProps) {
   const t = useT();
@@ -85,6 +85,21 @@ export function DatabasesPane({ state }: PaneProps) {
           )}
         </CardContent>
       </Card>
+
+      {defaults.database !== 'sqlite' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">SQLite</CardTitle>
+            <CardDescription>{t('pane.databases.subtitle')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" size="sm" disabled={!!state.busy}
+              onClick={() => void state.act(t('dash.switching', { name: 'SQLite' }), (c) => c.setDefaultDB('sqlite'))}>
+              {t('common.makeDefault')}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       {DB_IDS.filter((id) => services[id]).length === 0 ? (
         <EmptyState icon={<Database />} title={t('dash.noServices')} />

@@ -13,6 +13,9 @@ import (
 	"github.com/lair-sh/lair/internal/services"
 )
 
+// healthyRun is the minimum uptime that resets the restart backoff.
+const healthyRun = 10 * time.Second
+
 // Process is the minimal handle the supervisor needs. It exists so tests can
 // drive the state machine without spawning real processes.
 type Process interface {
@@ -158,6 +161,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		spec := s.spec
 		s.mu.Unlock()
 
+		startedAt := time.Now()
 		proc, err := s.runner.Start(spec)
 		if err != nil {
 			s.mu.Lock()
@@ -179,6 +183,12 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		s.mu.Unlock()
 
 		waitErr := proc.Wait()
+		// A process that stayed up for a while was healthy; a crash loop must
+		// keep escalating the backoff up to Max. Resetting on a long *delay*
+		// (as before) capped the effective wait at ~16 s forever.
+		if time.Since(startedAt) >= healthyRun {
+			s.backoff.Reset()
+		}
 
 		s.mu.Lock()
 		s.current = nil
@@ -244,9 +254,6 @@ func (s *Supervisor) sleep(ctx context.Context, d time.Duration) bool {
 		s.backoff.Reset()
 		return true
 	case <-time.After(d):
-		if d >= 10*time.Second {
-			s.backoff.Reset()
-		}
 		return true
 	}
 }

@@ -15,8 +15,12 @@ func InitNeeded(id, dataDir string) bool {
 		_, err := os.Stat(filepath.Join(dataDir, "PG_VERSION"))
 		return os.IsNotExist(err)
 	case "mysql", "mariadb":
-		entries, err := os.ReadDir(dataDir)
-		return os.IsNotExist(err) || err == nil && len(entries) == 0
+		// The system-tables directory is the reliable marker that
+		// mysqld --initialize / mariadb-install-db completed. Counting any
+		// entry is wrong: EnsureDataDir writes my.cnf (and mysqld-auto.cnf)
+		// before init runs, which made a fresh datadir look initialised.
+		_, err := os.Stat(filepath.Join(dataDir, "mysql"))
+		return os.IsNotExist(err)
 	default:
 		_, err := os.Stat(dataDir)
 		return os.IsNotExist(err)

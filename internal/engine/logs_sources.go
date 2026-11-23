@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/lair-sh/lair/internal/services"
 )
 
 // LogSource is one discoverable group of log files. `path` is the directory
@@ -67,7 +69,40 @@ func (e *Engine) ListLogSources() ([]LogSource, error) {
 			Kind: "service", ID: "php-fpm", Name: "PHP-FPM (sitios)", Path: e.Paths.Log, Files: dedupe(files),
 		})
 	}
+	// The supervisor writes <id>.log for every service it runs. Expose those
+	// files so database/cache logs are reachable from the Logs pane.
+	for _, id := range services.IDs() {
+		if files := logFiles(e.Paths.Log, id+".log"); len(files) > 0 {
+			sources = append(sources, LogSource{
+				Kind: "service", ID: id, Name: serviceLabel(id), Path: e.Paths.Log, Files: files,
+			})
+		}
+	}
 	return sources, nil
+}
+
+func serviceLabel(id string) string {
+	switch id {
+	case "postgres":
+		return "PostgreSQL"
+	case "mariadb":
+		return "MariaDB"
+	case "mongodb":
+		return "MongoDB"
+	case "mysql":
+		return "MySQL"
+	case "redis":
+		return "Redis"
+	case "valkey":
+		return "Valkey"
+	case "meilisearch":
+		return "Meilisearch"
+	case "typesense":
+		return "Typesense"
+	case "rustfs":
+		return "RustFS"
+	}
+	return id
 }
 
 // logFiles returns the requested names that exist as regular .log files. An

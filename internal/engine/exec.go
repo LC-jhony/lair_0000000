@@ -42,7 +42,16 @@ func (e *Engine) ResolveTool(tool, dir string) (Invocation, error) {
 	case "psql", "pg_dump", "pg_restore", "createdb", "dropdb":
 		return e.resolveClient(c, "postgres", tool)
 	case "mysql", "mysqldump":
-		return e.resolveClient(c, "mysql", tool)
+		inv, err := e.resolveClient(c, "mysql", tool)
+		if err == nil {
+			return inv, nil
+		}
+		// MariaDB ships drop-in mysql/mysqldump clients. With only MariaDB
+		// installed the shims must still work.
+		if fallback, ferr := e.resolveClient(c, "mariadb", tool); ferr == nil {
+			return fallback, nil
+		}
+		return inv, err
 	case "mariadb":
 		return e.resolveClient(c, "mariadb", tool)
 	case "redis-cli":

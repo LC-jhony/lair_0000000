@@ -35,6 +35,19 @@ func SuggestPort(preferred int) int {
 	return 0
 }
 
+// AuxPorts lists the extra ports a service binds besides its main one.
+// Installers must validate these too: typesense uses port-1 for peering and
+// rustfs uses port+1 for its web console.
+func AuxPorts(id string, port int) []int {
+	switch id {
+	case "typesense":
+		return []int{port - 1}
+	case "rustfs":
+		return []int{port + 1}
+	}
+	return nil
+}
+
 // PortConflict describes an occupied port and its owner.
 type PortConflict struct {
 	Port       int
@@ -51,8 +64,12 @@ func CheckPort(port int) *PortConflict {
 	if OwnerFunc != nil {
 		owner = OwnerFunc(port)
 	}
+	suggestion := SuggestPort(port + 1)
+	if suggestion == 0 {
+		suggestion = SuggestPort(1024) // never suggest the invalid port 0
+	}
 	return &PortConflict{
-		Port: port, Owner: owner, Suggestion: SuggestPort(port + 1),
+		Port: port, Owner: owner, Suggestion: suggestion,
 	}
 }
 
