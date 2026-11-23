@@ -83,5 +83,5 @@ El único código que toma privilegios es el contenido de:
 ## Limitaciones conocidas
 
 - No hay sandbox ni aislamiento de procesos: los servicios son procesos normales del usuario.
-- El soporte macOS/Windows es actualmente una abstracción; la integración privilegiada real existe solo para Linux/systemd.
+- La integración privilegiada de Linux usa systemd/dnsmasq. macOS genera `/etc/resolver/<dominio>` apuntando al servidor DNS embebido de Lair en `127.0.0.1:53535` e instala la CA con `security`. Windows genera un bloque gestionado en el archivo `hosts`, instala la CA con `certutil` y usa workers `php-cgi` en puertos loopback en lugar de FPM/sockets UNIX. Cada plan se entrega como script revisable y reversible.
 - El DNS propio es un resolver mínimo UDP: no implementa TCP, EDNS completo ni DNSSEC; confía en el upstream para el resto de nombres.

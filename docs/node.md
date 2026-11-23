@@ -16,8 +16,12 @@ lair node install --from ./node-v22.11.0-linux-x64.tar.gz
 
 `22`, `22.11` y `22.11.0` son equivalentes: el catálogo guarda una release por
 mayor. En la primera ejecución se instala la LTS más nueva y se fija como
-default. Las versiones ya instaladas por nvm siguen siendo visibles y se
-resuelven de solo lectura; Lair no usa nvm para instalar ni actualizar.
+default. **Node se instala siempre a través de nvm**: `lair node install` llama
+a `lair nvm install <versión>`, que carga `~/.nvm/nvm.sh` con argv validado.
+También puedes usar `lair nvm install|use|ls|current|exec|uninstall`
+directamente; `lair nvm exec` es lo que usan los shims `node`/`npm`/`npx`.
+Si nvm no está instalado, Lair avisa con la URL de instalación y no descarga
+scripts remotos por su cuenta.
 
 ## npm
 

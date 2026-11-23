@@ -24,7 +24,7 @@ sudo systemctl enable --now lair@$USER
 new shell                       # o: source ~/.bashrc
 lair php install 8.4 && lair php use 8.4
 lair node install                        # último LTS firmado: v26.13.1 (npm 11.20.0)
-lair services install postgres 17        # MariaDB ya se instaló con `lair install`
+lair services install mariadb            # opcional: SQLite ya se instaló con `lair install`
 node -v && npm -v && php -v
 lair doctor                     # diagnóstico si algo no responde
 ```
@@ -43,7 +43,9 @@ lair doctor                     # diagnóstico si algo no responde
 8. [Daemon, DNS y HTTPS](#8-daemon-dns-y-https)
 9. [Seguridad](#9-seguridad)
 10. [Solución de problemas](#10-solución-de-problemas)
-11. [Más documentación](#11-más-documentación)
+11. [Guía detallada de módulos](#11-guía-detallada-de-módulos)
+12. [Capturas de pantalla](#12-capturas-de-pantalla)
+13. [Más documentación](#13-más-documentación)
 
 ---
 
@@ -274,7 +276,7 @@ Lair no consulta un índice editable: consume un **manifiesto firmado con Ed2551
 
 > **Este catálogo es un ejemplo de desarrollo, no un feed de producción.** La clave pública está en `keys/public.ed25519` y la privada (`keys/private.ed25519`, `0600`) está excluida de Git. Para producción hay que generar un par nuevo, publicar solo la pública en el binario y firmar los manifiestos con la privada en un entorno controlado.
 
-Incluye Node.js `v26.13.1` LTS “Lithium” (npm `11.20.0`, equivalente a `nvm install 26`) para Linux/macOS/Windows en `x64`/`arm64`; PHP `8.1.34`, `8.2.32`, `8.3.32`, `8.4.23` y `8.5.8` (CLI + FPM estáticos, `linux-x64`) de `static-php-cli`; MariaDB `11.4.7` y `11.8.9`; y PostgreSQL `17.12.0` y `18.7.0` para `linux-x64`; Composer `2.11.2` (`composer.phar` oficial verificado por SHA-256). Todos los SHA-256 se verifican antes de extraer nada. MySQL no se incluye: los binarios oficiales requieren `libaio.so.1` del sistema y no arrancan en una instalación limpia.
+Incluye Node.js `v26.13.1` LTS “Lithium” (npm `11.20.0`, equivalente a `nvm install 26`) para Linux/macOS/Windows en `x64`/`arm64`; PHP `8.1.34`, `8.2.32`, `8.3.32`, `8.4.23` y `8.5.8` (CLI + FPM estáticos, `linux-x64`) y PHP `8.4.23` (CLI + FPM) para `macos-x64`/`macos-arm64` de `static-php-cli`; Windows usa los ZIP oficiales de `windows.php.net` y requiere el Visual C++ Redistributable x64; MariaDB `11.4.7` y `11.8.9`; y PostgreSQL `17.12.0` y `18.7.0` para `linux-x64`; Composer `2.11.2` (`composer.phar` oficial verificado por SHA-256). Todos los SHA-256 se verifican antes de extraer nada. MySQL no se incluye: los binarios oficiales requieren `libaio.so.1` del sistema y no arrancan en una instalación limpia.
 
 **Node se instala y se gestiona con nvm, siempre a través de Lair.** El daemon no llama a nvm directamente: ejecuta `lair nvm install <versión>`, que es quien carga `~/.nvm/nvm.sh`. El panel Runtimes (y la TUI con `n`) acepta la sintaxis real de nvm: `26`, `lts`, `22.16.0` o `node`. Las versiones se leen de `~/.nvm/versions/node` y los shims (`node`, `npm`, `npx`) resuelven mediante `lair nvm exec`, respetando `.nvmrc`. Puedes usar el comando directamente:
 
@@ -332,7 +334,7 @@ El binario es la **única** entrada: `lair <comando> [subcomando] [args] [flags]
 
 | Comando | Descripción |
 |---|---|
-| `lair install` | Bootstrap local (shims, PATH, CA, Composer verificado), instalación de **MariaDB como base de datos por defecto** y generación de los scripts privilegiados. Si no hay red o catálogo, avisa pero no aborta. |
+| `lair install` | Bootstrap local (shims, PATH, CA, Composer verificado), primera instalación de **PHP, Node LTS y SQLite** con barra de progreso, y generación de los scripts privilegiados (DNS/host virtual) para revisión y confirmación. Si no hay red o catálogo, avisa pero no aborta. |
 | `lair uninstall [--delete-data]` | Elimina PHP, Composer, Node, todos los servicios, shims, PATH y CA local; conserva las bases de datos salvo `--delete-data`. También genera la reversión privilegiada. |
 | `lair status [--json]` | Muestra home, estado del daemon, PHP, Node, servicios, puertos, sitios y jobs. `--json` para scripts. |
 | `lair doctor [--fix]` | Comprueba PATH, shims y versiones; imprime cómo arreglarlo. Con `--fix` regenera shims y PATH. **Primer comando si algo no responde.** |
@@ -346,8 +348,9 @@ El binario es la **única** entrada: `lair <comando> [subcomando] [args] [flags]
 | Comando | Descripción |
 |---|---|
 | `lair php list` | Versiones instaladas; `*` marca la default. |
-| `lair php install [versión]` | Instala una línea minor (`8.4`) o versión exacta. Sin versión, instala la más reciente del catálogo. |
-| `lair php use <minor>` | Cambia la default global. |
+| `lair php install [versión] [--from RUTA]` | Instala una línea minor (`8.4`) o versión exacta. Sin versión, instala la más reciente del catálogo. `--from` acepta un directorio, `.tar.gz` o `.zip` locales. |
+| `lair php use <minor>` (alias `lair use <minor>`) | Cambia la default global. |
+| `lair php uninstall <minor>` | Desinstala una línea; nunca permite quitar la default. |
 
 ```sh
 lair php install 8.3
@@ -360,14 +363,18 @@ php -v && composer -V
 | Comando | Descripción |
 |---|---|
 | `lair node list` | Versiones instaladas; `*` marca la default. |
-| `lair node install [versión]` | Instala con nvm mediante `lair nvm install <versión>`: sin versión (o `lts` / `latest-lts`) instala el último **LTS**; también acepta `26`, `node`, `latest` o `22.16.0`. La salida de nvm aparece en el job. |
+| `lair node install [versión] [--from RUTA]` | Instala con nvm mediante `lair nvm install <versión>`: sin versión (o `lts` / `latest-lts`) instala el último **LTS**; también acepta `26`, `node`, `latest` o `22.16.0`. `--from` instala desde un archivo local. La salida de nvm aparece en el job. |
+| `lair node default <major>` | Fija la default (acepta major, p. ej. `22`). |
+| `lair node update <major>` | Instala la última versión de esa major y la activa. |
+| `lair node uninstall <major>` | Desinstala esa major. |
 | `lair composer install` | Instala/verifica `tools/composer.phar` usando la versión y el SHA-256 del catálogo firmado (actualmente `2.11.2`, descargado de getcomposer.org). |
-| Configuración de Lair (botón en Sitios) | Muestra y configura el servidor Go: enlace, puertos, HTTPS, dominio y redirección HTTP→HTTPS. También permite elegir PHP/Node por defecto, ver las carpetas de proyectos y el estado de DNS y CA, e importar carpetas de Valet. |
-| Configuración de Lair | Activa o desactiva HTTPS para los sitios `*.test`. |
-| Configuración de Lair | Configura puertos, enlace y dominio del servidor Go. |
-| `lair node default <versión>` | Fija la default (acepta major, p. ej. `22`). |
+| `lair composer update` | Vuelve a descargar y verificar el phar. |
+| `lair composer version` | Muestra la versión instalada. |
+| `lair npm update` | Actualiza npm en el prefijo global de Node. |
+| `lair ext [add <name>]` | Lista los requisitos `ext-*` de `composer.json` o instala una extensión con el PHP del proyecto. |
+| `lair job retry <id>` | Reintenta un job fallido con los mismos parámetros. |
 
-> La acción `web` del daemon mantiene la paridad entre la CLI, la desktop y la TUI y expone las operaciones `status`, `configure`, `https-on` y `https-off`.
+> **Configuración de Lair** es el botón de la pestaña **Sitios** de la desktop: configura el servidor Go (enlace, puertos HTTP/HTTPS, dominio y redirección), activa o desactiva HTTPS para `*.test`, muestra el estado de DNS/CA y gestiona las carpetas de proyectos. La acción `web` del daemon mantiene la paridad entre CLI, desktop y TUI con las operaciones `status`, `configure`, `https-on` y `https-off`.
 
 ```sh
 lair node install                 # LTS actual: v26.13.1
@@ -389,7 +396,7 @@ Forma general: `lair services <acción> <id> [versión] [flags]`.
 | `update` | `lair services update postgres` | Instala la última, activa y reinicia. |
 | `uninstall` | `lair services uninstall postgres 17.2 --delete-data` | Elimina la instalación; sin `--delete-data` conserva los datos. |
 | `create-db` | `lair services create-db postgres laravel` | Crea una base de datos. |
-| `default` | `lair services default mariadb\|mysql\|postgres` | Elige la BD predeterminada de nuevos proyectos (MariaDB por defecto). |
+| `default` | `lair services default sqlite\|mariadb\|mysql\|postgres` | Elige la BD predeterminada de nuevos proyectos (SQLite por defecto). |
 | `restart` / `stop` | `lair services restart postgres` | Controla el supervisor. |
 
 IDs disponibles: `postgres`, `mysql`, `mariadb`, `mongodb`, `redis`, `valkey`, `meilisearch`, `typesense`, `rustfs`.
@@ -538,7 +545,12 @@ lair unlink mi-app.test    # quita el sitio, conserva los archivos
 ```sh
 lair pin php 8.4           # escribe php=8.4 en .lairrc del directorio actual
 lair pin node 22           # añade node=22
+lair pin root /srv/apps    # añade root=... (raíz de datos alternativa para este proyecto)
+lair unpin php             # quita una entrada; admite php|node|root
+lair isolated              # muestra el aislamiento activo del directorio actual
 ```
+
+`root=` redirige la raíz de datos del proyecto (por ejemplo, dónde se crea `database/database.sqlite`) y debe ser una ruta absoluta validada por el motor. `isolate` es distinto de `pin`: fija la versión **solo para el sitio aparcado** en `config.json`, sin versionarla en `.lairrc`.
 
 ### 3.8 Daemon
 
@@ -566,14 +578,14 @@ lair desktop
 - El proceso principal de Electron lee esos archivos y expone `window.lairDesktop.connect()` al renderer con `contextIsolation`; el renderer no tiene acceso a filesystem.
 - La app adopta el estado que devuelve el daemon, usa jobs con polling y no instala nada por sí misma. Cada texto visible es una clave de `app/lang/<código>/app.json` (en, es, cs).
 - El bridge se desactiva con `lair daemon --foreground --no-desktop` y su puerto se cambia con `--desktop-port N`.
-- El sidebar organiza once panes: **General** (antes *Overview*), Bases de datos, Runtimes, Servicios, Sitios, **Mail**, **Dumps**, **Debugger**, **Logs** y **About** (antes *System*). Los cuatro nuevos son panes del sidebar, **no ventanas flotantes ni una bandeja nativa**: se decidió mantener todo dentro de la misma ventana para no duplicar estado ni atajos.
+- El sidebar organiza **diez panes**: **Resumen** (antes *Overview*), **Runtimes**, **Bases de datos**, **Servicios**, **Sitios**, **Correo (Mail)**, **Dumps**, **Depurador (Debugger)**, **Logs** y **Sistema** (antes *About*). Mail, Dumps, Debugger y Logs son panes del sidebar, **no ventanas flotantes ni una bandeja nativa**: se decidió mantener todo dentro de la misma ventana para no duplicar estado ni atajos. Los atajos **1**–**9** saltan directamente a cada pane y **I** abre el diálogo de instalación de servicios.
 - El paquete `.deb` instala `/usr/share/applications/lair.desktop` e `/usr/share/icons/hicolor/scalable/apps/lair.svg`. Tras instalar, cierra sesión y vuelve a entrar (o ejecuta `update-desktop-database`) para que el icono aparezca en el menú.
 
 ### 3.10 Dashboard de terminal (`lair tui`)
 
-Si prefieres la terminal, `lair tui` (alias `lair dashboard`) abre un panel interactivo construido con **React/Ink y [termcn](https://termcn.dev)**: los mismos diez panes de la navegación lateral que la app de escritorio (**Overview**, Runtimes, Databases, Services, Sites, Mail, Dumps, Debugger, Logs y System), con los mismos textos, i18n (es/en/cs) y acciones del daemon. El bundle se compila en `app/tui/` con componentes de termcn (Card, Badge, Sidebar, KeyValue, Toggle, StatusMessage…) y se incrusta en el binario Go (`internal/assets/tui.mjs`), así que `lair tui` no necesita `node_modules`. Requiere Node 22+ (usa el PATH o el gestionado por nvm); si no está disponible cae al panel anterior de **Charmbracelet** (Bubble Tea, Bubbles, Lip Gloss, Huh, Glamour). Si la shell no ofrece un TTY real (IDE, runners), `lair tui` abre la TUI dentro de un PTY con `script(1)` para que Ink pueda activar el modo raw; en Windows sin `script(1)` muestra el estado en texto plano. Para reconstruirlo tras cambiar la TUI: `cd app && npm run tui:build`. Verifica tipos con `npm run tui:typecheck`.
+Si prefieres la terminal, `lair tui` (alias `lair dashboard`) abre un panel interactivo construido con **React/Ink y [termcn](https://termcn.dev)**: los mismos diez panes de la navegación lateral que la app de escritorio (**Overview**, Runtimes, Databases, Services, Sites, Mail, Dumps, Debugger, Logs y System), con los mismos textos, i18n (es/en/cs) y acciones del daemon. El bundle se compila en `app/tui/` con componentes de termcn (Card, Badge, Sidebar, KeyValue, Toggle, StatusMessage…) y se incrusta en el binario Go (`internal/assets/tui.mjs`), así que `lair tui` no necesita `node_modules`. Requiere Node 22+ (usa el PATH o el gestionado por nvm); si no está disponible cae al panel anterior de **Charmbracelet** (Bubble Tea, Bubbles, Lip Gloss, Huh, Glamour), que tiene **nueve panes** (Resumen, Runtimes, Bases de datos, Servicios, Sitios, Correo, Dumps, Debugger y Sistema): los registros se consultan con **`v`**, no son un pane. El fallback con `1`–`9` salta al pane correspondiente y `I` instala un servicio. Si la shell no ofrece un TTY real (IDE, runners), `lair tui` abre la TUI dentro de un PTY con `script(1)` para que Ink pueda activar el modo raw; en Windows sin `script(1)` muestra el estado en texto plano. Para reconstruirlo tras cambiar la TUI: `cd app && npm run tui:build`. Verifica tipos con `npm run tui:typecheck`.
 
-Además de `n` (Node LTS), `p` (PHP), `m` (MariaDB), `u` (catálogo), `s` (servicios), `r` (refrescar) y `q` (salir), ofrece `d` (predeterminada), `y` (usar versión), `z` (desinstalar), `b` (crear BD), `v` (logs), `x` (cancelar trabajo), `a`/`e`/`o` (aparcar/enlazar/desvincular), `c` (certificado), `g` (pin) e `i` (aislar). Las mayúsculas **`M` (Mail), `D` (Dumps), `B` (Debugger), `E` (detalle de sitio) y `X` (borrar sitio)** abren las superficies avanzadas; no confundirlas con las minúsculas `m` (MariaDB), `d` (default), `b` (crear base de datos) y `e` (enlazar sitio). La tecla **`E`** muestra un subconjunto del detalle de sitio de la desktop —Overview (URL, rutas, PHP, Node, BD, HTTPS, estado de `root`, dominios y avisos) y Environment (valores secretos enmascarados)— reutilizando la acción `site`; `v` abre los registros del sitio. La tecla **`X`** pide confirmación para desvincular el sitio y permite borrar también su carpeta (`delete_files: true`). La tecla **`V`** (mayúscula) muestra el **vhost generado** del sitio seleccionado y la tecla **`t`** (desde el detalle `E`) alterna su estado **enabled/disabled** (con confirmación, `op: set-enabled`): al desactivar, Lair retira el host virtual del router web Go. La tecla `v` sigue abriendo registros y el pane **Logs** añade el filtro por `sources`.
+Además de `1`–`9` (ir al pane), `I` (instalar servicio), `n` (Node LTS), `p` (PHP), `m` (MariaDB), `u` (catálogo), `s` (servicios), `r` (refrescar) y `q` (salir), ofrece `d` (predeterminada), `y` (usar versión), `z` (desinstalar), `b` (crear BD), `v` (logs), `x` (cancelar trabajo), `a`/`e`/`o` (aparcar/enlazar/desvincular), `c` (certificado), `g` (pin) e `i` (aislar). Las mayúsculas **`M` (Mail), `D` (Dumps), `B` (Debugger), `E` (detalle de sitio) y `X` (borrar sitio)** abren las superficies avanzadas; no confundirlas con las minúsculas `m` (MariaDB), `d` (default), `b` (crear base de datos) y `e` (enlazar sitio). La tecla **`E`** muestra un subconjunto del detalle de sitio de la desktop —Overview (URL, rutas, PHP, Node, BD, HTTPS, estado de `root`, dominios y avisos) y Environment (valores secretos enmascarados)— reutilizando la acción `site`; `v` abre los registros del sitio. La tecla **`X`** pide confirmación para desvincular el sitio y permite borrar también su carpeta (`delete_files: true`). La tecla **`V`** (mayúscula) muestra el **vhost generado** del sitio seleccionado y la tecla **`t`** (desde el detalle `E`) alterna su estado **enabled/disabled** (con confirmación, `op: set-enabled`): al desactivar, Lair retira el host virtual del router web Go. La tecla `v` sigue abriendo registros y el pane **Logs** añade el filtro por `sources`.
 
 ```sh
 lair tui          # o: lair dashboard
@@ -587,7 +599,15 @@ Cada shim contiene `exec "<lair>" exec <tool> "$@"`. El subcomando oculto `exec`
 
 ### 3.12 Superficies de soporte: Mail, Dumps, Debugger y Logs
 
-Cuatro panes comparten el `Dispatcher` del daemon: ninguno implementa lógica propia en la desktop ni en la TUI. El backend las expone como **tres acciones nuevas** (`mail`, `dumps`, `debugger`) más la extensión de `logs-list` con `sources`. Todas se invocan con el sobre `{ "action", "payload" }` del bridge `POST /api` (o con `lair <acción>` cuando la CLI las exponga; mientras tanto: `verify with lair <action>`).
+Cuatro panes comparten el `Dispatcher` del daemon: ninguno implementa lógica propia en la desktop ni en la TUI. El backend las expone como **tres acciones nuevas** (`mail`, `dumps`, `debugger`) más la extensión de `logs-list` con `sources`. Todas se invocan con el sobre `{ "action", "payload" }` del bridge `POST /api`. La CLI las expone directamente, así que **no hace falta construir payloads a mano**:
+
+```sh
+lair mail status | list | open <id> | raw <id> | clear [inbox] | env | message <id> | start | stop
+lair dumps status | list | clear | capture-on | capture-off | options [tipos] [show-in-page] | ingest --site ... --type ... --time ... --request ... --message ... --token ...
+lair debugger status | detect-on | detect-off | breakpoints-on | breakpoints-off
+```
+
+`dumps ingest` es la entrada del agente PHP (por eso exige el token de `run/dumps.token`); el resto son comandos de gestión. `mail env` imprime el bloque `.env` listo para pegar y `mail message` muestra un mensaje por id.
 
 #### Mail — catcher SMTP
 
@@ -604,7 +624,7 @@ MAIL_SCHEME=null
 
 El catcher acepta `AUTH PLAIN` y `AUTH LOGIN` con **cualquier credencial**: la contraseña se ignora y el **usuario elige la bandeja** (normalizado a minúsculas, p. ej. `Mi App` → `mi-app`); sin autenticar se usa `default`. Acepta hasta 1000 destinatarios y 25 MB por mensaje, sin TLS ni relay: nada sale del equipo. Los mensajes se guardan con rename atómico en `<root>/mail/<bandeja>/` y se pueden consultar por bandeja con el campo `inbox`.
 
-Acciones (campo `op` del payload de `mail`): `status`, `start`, `stop`, `list`, `message`, `raw`, `clear`. CLI: `lair mail list`, `lair mail open <id>`, `lair mail raw <id>`, `lair mail clear [inbox]`.
+Acciones (campo `op` del payload de `mail`): `status`, `start`, `stop`, `list`, `message`, `raw`, `clear`, `env`. CLI equivalente: `lair mail status|start|stop|list|open <id>|raw <id>|clear [inbox]|env|message <id>`.
 
 ```json
 { "action": "mail", "payload": { "op": "status" } }
@@ -618,7 +638,7 @@ Acciones (campo `op` del payload de `mail`): `status`, `start`, `stop`, `list`, 
 
 El pane Dumps recoge el volcado de variables de las peticiones PHP. El agente se inyecta con **`auto_prepend_file` en los pools FPM existentes** de cada sitio (los mismos que usa el sitio; no se crea un pool nuevo) y envía cada volcado al daemon con un **token dedicado** en `run/dumps.token` (`0600`). La captura se puede desactivar en caliente.
 
-Acciones (campo `op` del payload de `dumps`): `status`, `capture-on`, `capture-off`, `list`, `clear`. El campo opcional `site` restringe la operación a un sitio aparcado.
+Acciones (campo `op` del payload de `dumps`): `status`, `capture-on`, `capture-off`, `list`, `clear`, `options`, `ingest`. El campo opcional `site` restringe la operación a un sitio aparcado. `options` configura los tipos de volcado y si se muestran en la página; `ingest` es la entrada usada por el agente PHP. CLI equivalente: `lair dumps status|capture-on|capture-off|list|clear|options|ingest`.
 
 ```json
 { "action": "dumps", "payload": { "op": "capture-on", "site": "mi-app.test" } }
@@ -633,7 +653,7 @@ Acciones (campo `op` del payload de `dumps`): `status`, `capture-on`, `capture-o
 
 El pane Debugger muestra el estado de Xdebug y permite activarlo solo mientras se depura. **Reutiliza los pools FPM del sitio**: no deja un pool de depuración permanente escuchando. El puerto por defecto del cliente es `9003`.
 
-Acciones (campo `op` del payload de `debugger`): `status`, `start`, `stop`, `enable`, `disable`; `site` y `port` son opcionales.
+Operaciones del payload (`op`): `status`, `start`, `stop`, `enable`, `disable`; `site` y `port` son opcionales. La CLI usa nombres más explícitos: `lair debugger status|detect-on|detect-off|breakpoints-on|breakpoints-off` (equivalen a activar/desactivar la detección y los breakpoints).
 
 ```json
 { "action": "debugger", "payload": { "op": "status" } }
@@ -657,20 +677,22 @@ Acciones (campo `op` del payload de `debugger`): `status`, `start`, `stop`, `ena
 
 Los nombres de origen son ilustrativos; la lista autoritativa de acciones y payloads está en `internal/daemon/protocol.go`. El contenido de un registro se sigue leyendo con `{ "action": "logs", "payload": { "name": "..." } }`.
 
-### 3.13 Inventario de acciones del daemon (35)
+### 3.13 Inventario de acciones del daemon (49)
 
-El `Dispatcher` registra **35 acciones compartidas** por desktop, TUI y CLI; `uninstall` y `shutdown` son internas de la CLI/daemon y no cuentan en este inventario.
+El `Dispatcher` registra **49 acciones** en `internal/daemon/protocol.go`. La CLI, la TUI y la desktop llaman al mismo `Dispatcher`: no hay lógica de negocio duplicada en los clientes. `app/scripts/check-actions.mjs` verifica en CI que las 43 acciones declaradas por el cliente desktop existen en el daemon.
 
 | Área | Acciones |
 |---|---|
-| Estado y catálogo | `status`, `versions`, `update`, `bootstrap`, `ensure-shims` |
-| Instalación y jobs | `install-php`, `install-node`, `install-service`, `job`, `jobs`, `job-cancel` |
+| Estado, catálogo y arranque | `status`, `versions`, `update`, `bootstrap`, `first-run`, `ensure-shims`, `restart`, `shutdown` |
+| Instalación y jobs | `install-php`, `install-node`, `install-service`, `job`, `jobs`, `job-cancel`, `job-retry` |
+| Runtimes y versiones | `php-use`, `php-uninstall`, `node-default`, `node-update`, `node-uninstall`, `composer-update`, `ext-add`, `ext-required`, `npm-update`, `isolated`, `unpin`, `unisolate` |
 | Registros | `logs`, `logs-list` (con `sources`) |
-| Versiones y servicios | `php-use`, `node-default`, `service-use`, `service-restart`, `service-stop`, `service-uninstall`, `ensure-database`, `create-db`, `db-default` |
-| Sitios y configuración | `park`, `link`, `unlink`, `secure`, `web`, `project`, `pin`, `isolate`, `restart`, **`site`** (detalle, alias, enable/disable, vhost generado, puertos, root con página de estado y borrado con confirmación) |
+| Servicios y bases de datos | `service-use`, `service-restart`, `service-stop`, `service-uninstall`, `create-db`, `ensure-database`, `db-default` |
+| Sitios y configuración | `park`, `link`, `unlink`, `secure`, `web`, `project`, `pin`, `isolate`, **`site`** |
 | Superficies de soporte | `mail`, `dumps`, `debugger` |
+| Desinstalación | `uninstall` |
 
-La acción `site` completa el inventario y sigue el mismo patrón de campo `op` que `mail`, `dumps` y `debugger`; sus operaciones (`detail`, `env`, `env-set`, `domains`, `set-enabled`, `config`, `delete`/`unlink`) **no añaden acciones**: el inventario sigue siendo de 35. Su detalle está en [§3.6](#36-sitios-y-https). `app/scripts/check-actions.mjs` verifica en CI que cada acción declarada por el cliente desktop existe en el daemon.
+La acción `site` sigue el mismo patrón de campo `op` que `mail`, `dumps` y `debugger`; sus operaciones (`detail`, `env`, `env-set`, `domains`, `set-enabled`, `config`, `delete`/`unlink`) **no añaden acciones**. Su detalle está en [§3.6](#36-sitios-y-https).
 
 ---
 
@@ -687,7 +709,8 @@ sudo systemctl enable --now lair@$USER
 
 lair php install 8.4 && lair php use 8.4
 lair node install                       # LTS v26.13.1
-lair services default mariadb           # ya instalada por `lair install`
+lair services default sqlite             # SQLite ya se instaló con `lair install`
+# o, si prefieres un servidor: lair services install mariadb && lair services default mariadb
 
 # Todo en un paso: instalador, BD, .env y sitio *.test
 lair project new mi-app --parent ~/proyectos --database=mariadb --secure
@@ -867,7 +890,193 @@ lair doctor                              # diagnóstico general
 
 ---
 
-## 11. Más documentación
+## 11. Guía detallada de módulos
+
+Esta sección explica **qué hace cada módulo, cómo lo hace y cómo comprobarlo**. El principio rector del proyecto es que la lógica de negocio vive una sola vez en `internal/engine` y se expone mediante `internal/daemon`; la CLI, la TUI y la desktop son frentes del mismo motor. Los módulos con estado (configuración, instalación, supervisión) usan un único propietario del mutex para evitar escrituras perdidas.
+
+### 11.1 `cmd/lair` e `internal/cli` — la entrada única
+
+`cmd/lair` es el único `main`. El mismo binario decide qué hacer según `argv[0]` y el primer argumento:
+
+| Modo | Se activa con | Qué hace |
+|---|---|---|
+| CLI | `lair <comando>` | Habla con el daemon por `run/api.sock` si está vivo; si no, usa el motor **en proceso** (modo offline). No hay dos implementaciones de la lógica. |
+| Daemon | `lair daemon --foreground` | Sirve la API unix, el bridge desktop, el DNS y el router web. Sin `--foreground` solo imprime el aviso y sale: se espera que lo gestione `lair@<usuario>.service`. |
+| `exec` | Indirecto, desde los shims | Resuelve la versión para el directorio actual y hace `execve`, sin proceso intermediario. Es un subcomando oculto: no lo llames a mano. |
+
+Archivos: `cli.go` contiene `usage()` y el despacho; `commands.go` la mayoría de los comandos; `surfaces.go` (`mail`, `dumps`, `debugger`); `project.go` el asistente Laravel; `nvm.go` el puente a nvm; `daemon.go` el arranque del daemon; `exec.go` la resolución de shims; `tui.go` el fallback de Charmbracelet y `tui_react.go` el bundle React/Ink incrustado.
+
+**Verificar:** `./lair help`, `./lair status --json`, `./lair doctor`.
+
+### 11.2 `internal/app` — rutas e identidad
+
+`Resolve()` aplica la precedencia `LAIR_HOME` → `$XDG_DATA_HOME/lair` → `~/.local/share/lair` y devuelve un `Paths` con todas las subcarpetas derivadas: `bin/`, `tools/`, `php/`, `node/`, `services/`, `log/`, `run/`, `certs/`, `mail/`, `dumps/`. `Platform()` produce los identificadores del catálogo (`linux-x64`, `macos-arm64`, `windows-x64`, …). `ValidateProjectRoot()` rechaza rutas relativas, dentro de `$LAIR_HOME` y enlaces simbólicos: es la barrera que evita que un payload de sitio o un `pin root` escriba fuera de la raíz del proyecto.
+
+**Verificar:** `LAIR_HOME=/tmp/prueba ./lair status` y `./lair doctor`.
+
+### 11.3 `internal/assets` + `internal/manifest` — catálogo firmado
+
+El binario lleva `catalog.json` y su firma Ed25519 incrustados con `go:embed`; el repositorio publica la misma pareja en `catalog/`. `manifest` verifica la firme sobre **los bytes exactos del JSON** antes de parsearlo, gestiona el serial, la caché (6 h), los canales (`stable`, `beta`, `experimental` vía `LAIR_CHANNEL`) y las marcas LTS. Un mirror con serial mayor sustituye al embebido; uno más antiguo o caducado se ignora. La confianza es de la firma, no del host: `LAIR_MANIFEST_BASE_URLS` solo cambia de dónde se descarga.
+
+**Verificar:** `./lair update` y `./lair versions` (o `lair status`, que muestra las versiones disponibles). Para volver a firmar tras editar el catálogo, el comando está en [§2.7](#27-catálogo-firmado-de-ejemplo).
+
+### 11.4 `internal/download` + `internal/installer` — descargas y jobs
+
+Toda instalación es un **job**: la descarga va a un fichero `.part`, se calcula el SHA-256 en streaming y solo después se extrae con `safeJoin` (impide `../` en los archives). Los builds marcados como *yanked* se rechazan y se sustituye por la versión válida siguiente. `installer.Manager` expone `Start`, `Status`, `Cancel` y `Retry`; cada `Status` lleva `Downloaded`, `Total`, `Phase` y `Error`. El daemon registra un hook `onDone` que regenera shims y PATH al terminar cada job, de modo que un binario recién instalado es usable en una shell nueva sin pasos extra.
+
+El progreso se muestra donde tiene sentido: barra en la CLI solo cuando hay TTY (para no romper salidas capturadas), barra global en la desktop bajo la cabecera y barra en el footer de la TUI Go.
+
+**Verificar:** `lair php install 8.4` en una terminal, `lair job <id>`, `lair job retry <id>`, `lair logs <id>-install`.
+
+### 11.5 `internal/config` — estado atómico
+
+`config.json` (0600) es la única fuente de verdad de versiones activas, puertos, sitios y carpetas de proyecto. `Store` ofrece `View()` (copia de lectura) y `Update(fn)` (lee, modifica y escribe con `rename` atómico bajo mutex). El daemon y el instalador **comparten el mismo `Store`**: dos stores tendrían dos mutexes y una escritura concurrente se perdería entre "leer de disco" y "renombrar".
+
+Ejemplo y significado de cada campo en [§2.2](#22-configuración-persistente-configjson). No se edita a mano: los comandos mantienen el estado coherente.
+
+### 11.6 `internal/php` — versiones paralelas
+
+Cada línea minor vive en `php/<minor>/` con `bin/`, `sbin/php-fpm`, `etc/php.ini`, `etc/pool.d/`, `run/` y un marcador `lair.json`. El módulo genera el `php.ini` y los pools FPM por sitio, gestiona extensiones (`lair ext add`) y configura Xdebug bajo demanda. La resolución para un directorio sigue la precedencia de [§5](#5-resolución-de-versiones).
+
+**Verificar:** `lair php list`, `lair php install 8.4`, `php -v`, `lair ext`.
+
+### 11.7 `internal/composer` — el phar verificado
+
+`composer.phar` se descarga y se comprueba contra el SHA-256 del catálogo (también se puede fijar con `LAIR_COMPOSER_SHA256` en pruebas). Vive en `tools/composer.phar` y se expone como shim. El instalador de Laravel se instala en un `COMPOSER_HOME` aislado, nunca en el global del usuario.
+
+**Verificar:** `lair composer version`, `lair composer update`, `composer -V`.
+
+### 11.8 `internal/node` + `internal/nvm` — Node y nvm
+
+Node se instala **siempre a través de nvm**: el daemon ejecuta `lair nvm install <versión>`, que es quien carga `~/.nvm/nvm.sh` con argv validado (nunca se interpola texto del usuario en el shell). Sin versión se instala el último LTS del catálogo. El prefijo global de npm por major vive en `node/global/<major>/`, y los shims `node`/`npm`/`npx` resuelven con `lair nvm exec`, respetando `.nvmrc`. En Windows, donde nvm no existe, se usa el instalador del catálogo firmado.
+
+**Verificar:** `lair nvm ls`, `lair node install`, `lair node default 26`, `node -v && npm -v`.
+
+### 11.9 `internal/shims` — los wrappers que lo hacen transparent
+
+`Generate()` crea en `bin/` los ejecutables (`0755`) `php`, `php-fpm`, `composer`, `node`, `npm`, `npx`, `sqlite3`, `psql`, `pg_dump`, `pg_restore`, `createdb`, `dropdb`, `mysql`, `mariadb`, `mysqldump`, `redis-cli`, `valkey-cli` y `mongosh`. Cada uno apunta a la ruta absoluta del binario `lair` con el que se generó y contiene `exec "<lair>" exec <tool> "$@"`. `EnsureProfiles()` escribe bloques delimitados y reversibles en bash, zsh, fish y `environment.d`. Los clientes de BD inyectan automáticamente host, puerto y usuario del servicio activo, y `mysql`/`mysqldump` caen a MariaDB si solo esa está instalada.
+
+**Verificar:** `lair doctor --fix`, `echo $PATH`, `php -v`, `psql -d laravel`.
+
+### 11.10 `internal/services` — specs, puertos y datos
+
+Cada servicio es una `Spec` pura con binario, argumentos, puerto, directorio de datos, clientes que proporciona y fragmento `.env`:
+
+| ID | Puerto | Notas |
+|---|---|---|
+| `postgres` | 5432 | Siempre 5432; no se elige ni se cambia. Parada rápida con `pg_ctl -m fast` / `SIGINT`. |
+| `mariadb`, `mysql` | 3306 | `my.cnf` generado una sola vez; datos separados por versión. |
+| `mongodb` | 27017 | `mongosh`. |
+| `redis`, `valkey` | 6379 | Comparten puerto: instala el segundo con `--port 6380`. Sin build oficial en Windows. |
+| `meilisearch` | 7700 | `SCOUT_DRIVER=meilisearch`. |
+| `typesense` | 8108 | Peering en 8107; sin build para Windows. |
+| `rustfs` | 9000 | Consola en 9001; credenciales fijas de desarrollo. |
+| `sqlite3` | — | Herramienta de catálogo, **no** servicio supervisable: crea `database/database.sqlite` por proyecto. |
+
+Los datos se aíslan en `services/<id>/data/<versión>/`. La inicialización se decide con marcadores fiables (`PG_VERSION` para PostgreSQL; el directorio `mysql/` para MySQL/MariaDB), de modo que el `my.cnf` escrito por `EnsureDataDir` no haga creer que un datadir vacío ya está inicializado. `CreateDBCommand` construye identificadores SQL seguros y `CheckPort`/`AuxPorts` validan el puerto principal y los auxiliares antes de descargar.
+
+**Verificar:** `lair services list`, `lair services install mariadb`, `lair services create-db mariadb laravel`.
+
+### 11.11 `internal/supervisor` — procesos que se mantienen vivos
+
+Hay un supervisor por servicio. `Run()` hace `Start → Wait → backoff → restart`, registra el último error y conserva una cola de 50 líneas de log. El backoff empieza en 1 s, crece ×2 hasta 1 min y se reinicia solo tras un arranque **sano** (10 s arriba), no por haber esperado mucho: así un servicio que crashea en bucle sigue escalando hasta el máximo. La parada respeta `StopCmd` (`pg_ctl -m fast`, `mysqladmin shutdown`) y `StopSignal` (`SIGINT` para PostgreSQL) con fallback a `SIGTERM`, y envía la señal a **todo el grupo de procesos** para no huérfanizar subprocessos. Cada reinicio cierra su descriptor de log; los ficheros `<id>.log` se exponen en el pane Logs.
+
+**Verificar:** `lair services restart postgres`, `lair services stop postgres`, `lair restart`, `lair logs postgres`.
+
+### 11.12 `internal/platform`, `internal/dns`, `internal/pki` — sistema y red
+
+`platform.BuildPlan()` genera los scripts privilegiados que **tú revisas y ejecutas**: unidad systemd con `User=%i` y `NoNewPrivileges=yes`, regla polkit, `CAP_NET_BIND_SERVICE` para 80/443, drop-in de `systemd-resolved` (`DNS=127.0.0.1#53535`, `Domains=~test`) y copias de seguridad con `revert-privileged.sh`. Nunca hay `sudo` automático. `dns` monta dnsmasq solo en `127.0.0.1:53535` (nunca en el puerto 53 global) y `pki` emite la CA local y los certificados `*.test`; `certs/ca-key.pem` es un secreto.
+
+**Verificar:** los comandos de [§8](#8-daemon-dns-y-https) y `lair doctor`.
+
+### 11.13 `internal/fastcgi` + `internal/web` — el servidor web
+
+El router Go en `internal/web` publica los hosts virtuales **en memoria** a partir de `config.json`: no escribe en `/etc`, no instala nginx ni Valet y aplica los cambios en caliente. Para cada petición empareja por `Host`, aplica el vhost generado (dominios/alias, SNI, certificados) y sirve estáticos desde `public/` o pasa a PHP-FPM por socket vía FastCGI. Si el detector de raíz no devuelve `ok`, sirve `not-configured.html`, que solo muestra el host y la ruta esperada del front controller dentro del proyecto. Un sitio con `enabled: false` se retira del router. Decisiones en los [ADR 009](docs/adr/009-virtual-hosts-en-servidor-go.md) y [010](docs/adr/010-servidor-go-como-unico-web-layer.md).
+
+**Verificar:** navegar a `https://<sitio>.test`, `lair secure <sitio>`, tecla `V` en la TUI (vhost generado).
+
+### 11.14 `internal/mail` — catcher SMTP
+
+Sirve solo en `127.0.0.1:2525`. Acepta `AUTH PLAIN`/`LOGIN` con cualquier credencial y usa el usuario para elegir bandeja (normalizado a minúsculas; sin autenticar, `default`). Límite de 1000 destinatarios y 25 MB por mensaje, sin TLS ni relay: nada sale del equipo. Guarda los mensajes con rename atómico en `mail/<bandeja>/`. La configuración lista para `.env` se obtiene con `lair mail env`.
+
+**Verificar:** `lair mail start`, `lair mail status`, `lair mail list`, `lair mail open <id>`.
+
+### 11.15 `internal/dumps` — captura de `dump()`/`dd()`
+
+Inyecta un agente en los **pools FPM ya existentes** de cada sitio mediante `auto_prepend_file` (no crea un pool nuevo) y envía cada volcado al daemon con un token dedicado en `run/dumps.token` (0600). La captura se activa y desactiva en caliente, sin reiniciar PHP-FPM. `options` ajusta tipos y visibilidad en página; `clear` pide confirmación.
+
+**Verificar:** `lair dumps capture-on`, visitar el sitio, `lair dumps list`, `lair dumps capture-off`.
+
+### 11.16 `internal/engine` — orquestación, primera instalación y debugger
+
+Es la capa compartida. `FirstRun()` instala PHP, Node LTS, el CLI `sqlite3` y Composer como jobs normales con progreso. `EnsureDefaultDatabase()` elige SQLite en una instalación nueva pero **respeta una base de datos ya instalada** al actualizar, para no cambiar silenciosamente los proyectos existentes. `SiteControl()` produce el detalle de siete pestañas, enmascara secretos del `.env`, gestiona dominios/alias, `enabled`, el vhost generado y el borrado con validación de ruta. El debugger activa Xdebug bajo demanda reutilizando los pools FPM del sitio (puerto 9003), sin dejar un pool permanente escuchando. `Uninstall()` ignora rutas hostiles del payload y elimina solo lo generado bajo `$LAIR_HOME`.
+
+**Verificar:** `lair install` en un `LAIR_HOME` nuevo, `lair status --json`, `lair debugger status`.
+
+### 11.17 `internal/daemon` + `internal/desktopapi` — la API
+
+`protocol.go` define las **49 acciones** listadas en [§3.13](#313-inventario-de-acciones-del-daemon-49) y `Dispatcher` las ejecuta. La API local es un socket unix con token `0600` comparado en tiempo constante; `jobContext()` permite que un job sobreviva a la petición HTTP que lo inició. `desktopapi` expone `POST /api` en `127.0.0.1:9797` con la cabecera `X-Lair-Token`, sin servir HTML/CSS/JS y aceptando solo orígenes locales/Electron. El token nunca viaja en la URL.
+
+**Verificar:** `lair daemon --foreground`, `lair status`, `lair desktop`.
+
+### 11.18 `internal/project` — asistente Laravel
+
+`Detect()` reconoce proyectos por `artisan`/`composer.json` en las carpetas configuradas. `RunLaravel()` y `LaravelArgs()` construyen el `laravel new` con BD, `.env`, HTTPS y sitio `*.test`, compartiendo progreso, log y cancelación con los jobs del daemon. `ProjectDirs` fija `~/Lair` como carpeta por defecto; `migrate-dirs` recupera la antigua `~/lair` e `import-valet` lee la configuración de Valet **solo para leer**. Las credenciales viajan por variables de entorno, nunca en argumentos ni en logs.
+
+**Verificar:** `lair project info`, `lair project dirs list`, `lair project new blog --database=sqlite`.
+
+### 11.19 `app/` — desktop Electron y TUI React
+
+`app/electron/main.cjs` y `preload.cjs` mantienen `contextIsolation`: el renderer solo ve `window.lairDesktop.connect()`, que lee el token y la URL de `run/`. La app React consume la acción `status` con polling, ejecuta acciones con `act()` y muestra errores en un banner común. Todo texto visible es una clave de `app/lang/{en,es,cs}/app.json` (608 claves, verificadas por `npm run i18n:check`). El parámetro `?fake=1` activa un cliente de ejemplo usado para las capturas de esta sección. CI ejecuta `npm ci`, `test`, `typecheck`, `i18n:check`, `actions:check` y `build`.
+
+**Verificar:** `cd app && npm test && npm run typecheck && npm run actions:check`.
+
+### 11.20 Tabla rápida de verificación por módulo
+
+| Módulo | Comando que lo ejerce |
+|---|---|
+| CLI / CLI offline | `./lair help`, `./lair status --json` |
+| Paths | `LAIR_HOME=/tmp/x ./lair doctor` |
+| Catálogo | `./lair update` |
+| Installer / jobs | `./lair php install 8.4`, `./lair job <id>` |
+| Config | `./lair services default sqlite` |
+| PHP / extensiones | `./lair php list`, `./lair ext` |
+| Composer | `./lair composer version` |
+| Node / nvm | `./lair nvm ls`, `./lair node install` |
+| Shims | `./lair doctor --fix`, `php -v` |
+| Servicios | `./lair services list`, `./lair services install mariadb` |
+| Supervisor | `./lair services restart mariadb` |
+| Plataforma / DNS | `sudo "$LAIR_HOME/setup-privileged.sh"` (revisar antes) |
+| Web | abrir `https://<sitio>.test` |
+| Mail | `./lair mail env`, `./lair mail status` |
+| Dumps | `./lair dumps capture-on`, `./lair dumps list` |
+| Debugger | `./lair debugger status` |
+| Daemon / bridge | `./lair daemon --foreground`, `./lair desktop` |
+| Proyectos | `./lair project info`, `./lair project dirs list` |
+| Desktop / TUI | `cd app && npm test`, `./lair tui` |
+
+---
+
+## 12. Capturas de pantalla
+
+Las imágenes se generaron con la app React en modo `?fake=1` (datos de ejemplo, sin daemon real), a 1440×900. Sirven para reconocer cada pane de la interfaz; el comportamiento real se documenta en las secciones anteriores.
+
+| Pane | Captura |
+|---|---|
+| Resumen — estado general, servicios activos, sitios, trabajos y rutas | ![Resumen](docs/screenshots/overview.png) |
+| Runtimes — PHP y Node instalados | ![Runtimes](docs/screenshots/runtimes.png) |
+| Bases de datos — motores, versión activa, puerto y opción SQLite | ![Bases de datos](docs/screenshots/databases.png) |
+| Servicios — instalación, activación y registros por servicio | ![Servicios](docs/screenshots/services.png) |
+| Sitios — proyectos detectados y hosts `*.test` | ![Sitios](docs/screenshots/sites.png) |
+| Correo — bandejas del catcher SMTP | ![Correo](docs/screenshots/mail.png) |
+| Dumps — volcados capturados | ![Dumps](docs/screenshots/dumps.png) |
+| Depurador — estado de Xdebug y breakpoints | ![Depurador](docs/screenshots/debugger.png) |
+| Logs — registros filtrables por origen | ![Logs](docs/screenshots/logs.png) |
+| Sistema — versión, conexión y acciones de desinstalación | ![Sistema](docs/screenshots/system.png) |
+
+---
+
+## 13. Más documentación
 
 - [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — changelog detallado de la versión `v1.0.0`.
 - [`docs/CLI.md`](docs/CLI.md) — referencia completa de comandos y variables de entorno.

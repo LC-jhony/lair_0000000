@@ -19,7 +19,7 @@ interactiva, Lair ofrece instalarla y reintentar; sin TTY devuelve un error.
 ```sh
 lair pin php 8.2               # escribe php=8.2 en .lairrc
 lair pin node 20               # escribe node=20 en .lairrc
-lair pin root /otro/lair-home  # root=...: data root alternativo para el proyecto
+lair pin root ~/.local/share/lair-otro  # root=: data root alternativo (debe estar bajo $HOME)
 lair unpin php                 # quita la línea
 lair isolate php 8.4           # fija la versión en el sitio aparcado (config.json)
 lair isolate node --off        # alias de unisolate
@@ -27,6 +27,10 @@ lair unisolate node
 lair isolated                  # muestra los aislamientos activos
 lair use 8.4                   # atajo de `lair php use`
 ```
+
+El valor de `root=` se valida: debe ser absoluto, estar dentro del home del
+usuario y no salir de él mediante symlinks. Es un archivo versionable y
+`lair exec` crea directorios y ajusta permisos bajo esa ruta.
 
 `.flockrc` y `flock.json` se siguen leyendo por compatibilidad, pero los
 archivos canónicos son `.lairrc` y `lair.json`.
