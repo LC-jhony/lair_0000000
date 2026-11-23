@@ -16,8 +16,8 @@ func isTerminal(f *os.File) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }
 
-// execBinary replaces the current process with the resolved binary. argv[0] is
-// the shim name so tools that inspect it see a familiar command.
+// execBinary replaces the current process with the resolved binary. argv[0]
+// must be that binary's path so self-locating tools work from the shims.
 func execBinary(path string, argv, env []string) error {
 	return syscall.Exec(path, argv, env)
 }

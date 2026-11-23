@@ -10,4 +10,4 @@ Terminal=false
 Categories=Development;IDE;
 Keywords=php;laravel;node;desarrollo;
 StartupNotify=true
-StartupWMClass=lair
+StartupWMClass=lair-desktop

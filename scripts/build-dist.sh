@@ -76,10 +76,10 @@ Architecture: $arch
 Maintainer: LC-jhony <jhonyapm94@gmail.com>
 Homepage: https://github.com/LC-jhony/lair
 Description: native PHP/Laravel local development environment
- Lair is a single static Go binary providing a CLI, a local daemon, a web
- administration UI and shims for running PHP 8.1-8.5, Composer and Node
- natively, without Docker or VMs. It includes local DNS for *.test, HTTPS
- with a local CA, managed services and reversible PATH integration.
+ Lair is a single static Go binary providing a CLI, a local daemon, a native
+ desktop app and shims for running PHP 8.1-8.5, Composer and Node natively,
+ without Docker or VMs. It includes local DNS for *.test, HTTPS with a local
+ CA, managed services and reversible PATH integration.
 EOF
     dpkg-deb --root-owner-group --build "$root" "$DIST/lair_${VERSION}_${arch}.deb" >/dev/null
     echo "==> generado lair_${VERSION}_${arch}.deb"
@@ -87,20 +87,38 @@ EOF
 fi
 
 echo "==> generando SHA256SUMS"
+ASSETS=(
+  "lair_${VERSION}_darwin_amd64.tar.gz"
+  "lair_${VERSION}_darwin_arm64.tar.gz"
+  "lair_${VERSION}_linux_amd64.tar.gz"
+  "lair_${VERSION}_linux_arm64.tar.gz"
+  "lair_${VERSION}_windows_amd64.zip"
+  "lair_${VERSION}_windows_arm64.zip"
+)
+if [ "$HAVE_DEB" = 1 ]; then
+  ASSETS+=("lair_${VERSION}_amd64.deb" "lair_${VERSION}_arm64.deb")
+fi
+
+# Fallar en cuanto falte un artefacto esperado: nunca publicar un SHA256SUMS
+# incompleto (antes se silenciaban los errores con `2>/dev/null || true`).
+for asset in "${ASSETS[@]}"; do
+  [ -f "$DIST/$asset" ] || { echo "ERROR: falta el artefacto $asset" >&2; exit 1; }
+done
+
 (
   cd "$DIST"
   rm -f SHA256SUMS
-  sha256sum \
-    "lair_${VERSION}_amd64.deb" \
-    "lair_${VERSION}_arm64.deb" \
-    "lair_${VERSION}_darwin_amd64.tar.gz" \
-    "lair_${VERSION}_darwin_arm64.tar.gz" \
-    "lair_${VERSION}_linux_amd64.tar.gz" \
-    "lair_${VERSION}_linux_arm64.tar.gz" \
-    "lair_${VERSION}_windows_amd64.zip" \
-    "lair_${VERSION}_windows_arm64.zip" 2>/dev/null || true
+  sha256sum "${ASSETS[@]}"
 ) > "$DIST/SHA256SUMS.new"
 mv "$DIST/SHA256SUMS.new" "$DIST/SHA256SUMS"
-(cd "$DIST" && sha256sum -c SHA256SUMS)
+
+echo "==> verificación final de SHA256SUMS"
+(cd "$DIST" && sha256sum -c SHA256SUMS) || { echo "ERROR: verificación de hashes fallida" >&2; exit 1; }
+lines="$(wc -l < "$DIST/SHA256SUMS" | tr -d ' ')"
+[ "$lines" -eq "${#ASSETS[@]}" ] || {
+  echo "ERROR: SHA256SUMS tiene $lines líneas; se esperaban ${#ASSETS[@]}" >&2
+  exit 1
+}
+echo "==> $lines artefactos verificados correctamente"
 
 echo "Listo. Artefactos en $DIST"

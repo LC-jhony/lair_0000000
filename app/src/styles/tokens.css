@@ -1,0 +1,41 @@
+/*
+ * Legacy aliases used by the components that have not been migrated yet.
+ * The real theme tokens live in globals.css (Tailwind v4 + shadcn).
+ */
+:root {
+  --bg: var(--background);
+  --surface: var(--card);
+  --surface-alt: var(--muted);
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --brand: var(--primary);
+  --brand-contrast: var(--primary-foreground);
+  --danger: var(--destructive);
+  --warning: oklch(0.75 0.15 75);
+  --success: oklch(0.65 0.16 150);
+
+  --tone-neutral: var(--muted-foreground);
+  --tone-gray: var(--muted-foreground);
+  --tone-blue: oklch(0.6 0.16 245);
+  --tone-indigo: var(--brand);
+  --tone-green: var(--success);
+  --tone-orange: oklch(0.7 0.17 55);
+  --tone-brown: oklch(0.5 0.1 55);
+  --tone-cyan: oklch(0.65 0.13 210);
+  --tone-pink: oklch(0.65 0.2 340);
+  --tone-red: var(--danger);
+  --tone-purple: oklch(0.58 0.22 300);
+  --tone-teal: oklch(0.65 0.13 180);
+}
+
+.dark {
+  --warning: oklch(0.82 0.14 85);
+  --success: oklch(0.75 0.15 155);
+  --tone-blue: oklch(0.72 0.14 245);
+  --tone-orange: oklch(0.78 0.15 60);
+  --tone-brown: oklch(0.7 0.1 60);
+  --tone-cyan: oklch(0.78 0.12 210);
+  --tone-pink: oklch(0.75 0.17 340);
+  --tone-purple: oklch(0.72 0.17 300);
+  --tone-teal: oklch(0.75 0.12 180);
+}

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/lair-sh/lair/internal/app"
 	"github.com/lair-sh/lair/internal/daemon"
 	"github.com/lair-sh/lair/internal/engine"
 )
@@ -20,7 +22,23 @@ func runExec(args []string, out, errOut io.Writer) error {
 		return fmt.Errorf("usage: lair exec <tool> [args...]")
 	}
 	tool, userArgs := args[0], args[1:]
-	paths := mustPaths()
+	paths, err := mustPaths()
+	if err != nil {
+		return err
+	}
+	// A project may pin a different data root in .lairrc (root=...). The shim
+	// honours it before resolving any version, so two checkouts can use fully
+	// separate runtime sets without touching the shell environment.
+	if dir, wdErr := os.Getwd(); wdErr == nil {
+		if root := pinnedRoot(dir); root != "" {
+			if abs, absErr := filepath.Abs(root); absErr == nil {
+				_ = os.Setenv(app.EnvHome, abs)
+				if resolved, rerr := app.Resolve(); rerr == nil {
+					paths = resolved
+				}
+			}
+		}
+	}
 	eng, err := engine.New(paths, nil)
 	if err != nil {
 		return err
@@ -47,7 +65,7 @@ func runExec(args []string, out, errOut io.Writer) error {
 			caller: daemon.NewDispatcher(eng, nil), out: out, errOut: errOut,
 		}
 		// Try a network refresh, but a fresh signed cache is enough offline.
-		_ = eng.RefreshCatalog(context.Background())
+		_, _ = eng.RefreshCatalog(context.Background())
 		if ierr := cliCtx.installForTool(tool); ierr != nil {
 			return ierr
 		}
@@ -58,16 +76,67 @@ func runExec(args []string, out, errOut io.Writer) error {
 	}
 
 	env := append(append([]string(nil), inv.Env...), os.Environ()...)
-	argv := append([]string{tool}, inv.Args...)
+	// argv[0] must be the resolved binary: PostgreSQL clients and the npm/npx
+	// wrappers locate their files relative to it.
+	argv := append([]string{inv.Path}, inv.Args...)
 	argv = append(argv, userArgs...)
 	return execBinary(inv.Path, argv, env)
+}
+
+// pinnedRoot reads root= from a project's .lairrc (or the legacy .flockrc).
+func pinnedRoot(dir string) string {
+	for _, name := range []string{".lairrc", ".flockrc"} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "root=") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "root="))
+			}
+		}
+	}
+	return ""
+}
+
+// requestedVersion reads the version a project asks for, so a TTY prompt
+// installs the pinned version instead of an unrelated default.
+func requestedVersion(tool, dir string) string {
+	names := []string{".lairrc", ".flockrc"}
+	if tool == "node" {
+		names = append(names, ".nvmrc", ".node-version")
+	}
+	for _, name := range names {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		prefix := tool + "="
+		for _, line := range strings.Split(string(body), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, prefix) {
+				if v := strings.TrimSpace(strings.TrimPrefix(line, prefix)); v != "" {
+					return v
+				}
+			}
+		}
+		if tool == "node" && name != ".lairrc" && name != ".flockrc" {
+			v := strings.Fields(strings.TrimSpace(string(body)))
+			if len(v) > 0 && !strings.Contains(v[0], "*") && !strings.HasPrefix(v[0], "lts") && v[0] != "node" {
+				return v[0]
+			}
+		}
+	}
+	return ""
 }
 
 // installForTool maps a shim name to the install action that satisfies it.
 func (c *ctx) installForTool(tool string) error {
 	switch tool {
 	case "php", "php-fpm":
-		return c.installVersion(daemon.ActionInstallPHP, daemon.InstallRequest{})
+		dir, _ := os.Getwd()
+		return c.installVersion(daemon.ActionInstallPHP, daemon.InstallRequest{Version: requestedVersion("php", dir)})
 	case "composer":
 		exe, _ := os.Executable()
 		home, _ := os.UserHomeDir()
@@ -79,7 +148,8 @@ func (c *ctx) installForTool(tool string) error {
 		}
 		return c.installVersion(daemon.ActionInstallPHP, daemon.InstallRequest{})
 	case "node", "npm", "npx":
-		return c.installVersion(daemon.ActionInstallNode, daemon.InstallRequest{})
+		dir, _ := os.Getwd()
+		return c.installVersion(daemon.ActionInstallNode, daemon.InstallRequest{Version: requestedVersion("node", dir)})
 	case "psql", "pg_dump", "pg_restore", "createdb", "dropdb":
 		return c.installVersion(daemon.ActionInstallService, daemon.InstallRequest{ID: "postgres"})
 	case "mysql", "mysqldump":
@@ -88,8 +158,6 @@ func (c *ctx) installForTool(tool string) error {
 		return c.installVersion(daemon.ActionInstallService, daemon.InstallRequest{ID: "mariadb"})
 	case "redis-cli":
 		return c.installVersion(daemon.ActionInstallService, daemon.InstallRequest{ID: "redis"})
-	case "valkey-cli":
-		return c.installVersion(daemon.ActionInstallService, daemon.InstallRequest{ID: "valkey"})
 	case "mongosh":
 		return c.installVersion(daemon.ActionInstallService, daemon.InstallRequest{ID: "mongodb"})
 	default:
