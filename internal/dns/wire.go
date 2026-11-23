@@ -140,8 +140,12 @@ func BuildResponse(query []byte, answers ...ResourceRecord) ([]byte, error) {
 
 	resp := make([]byte, 12, 12+len(question)+len(answers)*16)
 	copy(resp, query[:12])
-	// QR=1, AA=1, RA=1; preserve the ID.
-	binary.BigEndian.PutUint16(resp[2:4], 0x8400|0x0080)
+	// QR=1, AA=1, RA=1; preserve the ID and the query's RD/CD bits. resolvd
+	// rejects a response whose RD does not mirror the query and falls back to
+	// TCP, which this loopback-only server does not listen on.
+	queryFlags := binary.BigEndian.Uint16(query[2:4])
+	flags := uint16(0x8400|0x0080) | (queryFlags & 0x0110) // RD, CD
+	binary.BigEndian.PutUint16(resp[2:4], flags)
 	binary.BigEndian.PutUint16(resp[4:6], 1) // QDCOUNT
 	binary.BigEndian.PutUint16(resp[6:8], uint16(len(answers)))
 	binary.BigEndian.PutUint16(resp[8:10], 0)

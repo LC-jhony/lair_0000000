@@ -1,7 +1,9 @@
 package web
 
 import (
+	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"net"
 	"net/http"
@@ -102,6 +104,9 @@ func TestHandlerProxiesToFPM(t *testing.T) {
 func TestGetCertificate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "certs")
 	s := NewServer(dir, "test")
+	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock"}); err != nil {
+		t.Fatal(err)
+	}
 	cert, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "www.acme.test"})
 	if err != nil {
 		t.Fatal(err)
@@ -109,11 +114,140 @@ func TestGetCertificate(t *testing.T) {
 	if len(cert.Certificate) == 0 {
 		t.Fatal("empty certificate")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "www.acme.test.pem")); err != nil {
-		t.Fatalf("cert not persisted: %v", err)
+	// Only the canonical site name may appear in the issued certificate.
+	if _, err := os.Stat(filepath.Join(dir, "acme.test.pem")); err != nil {
+		t.Fatalf("canonical cert not persisted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "www.acme.test.pem")); !os.IsNotExist(err) {
+		t.Fatalf("cert issued for the SNI subdomain instead of the site: %v", err)
+	}
+	parsed, err := x509.ParseCertificate(cert.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range parsed.DNSNames {
+		if strings.Contains(name, "www.acme.test") {
+			t.Fatalf("SAN leaked SNI host: %v", parsed.DNSNames)
+		}
 	}
 	if _, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "evil.example"}); err == nil {
 		t.Fatal("issued cert for non-test domain")
+	}
+}
+
+func TestGetCertificateRejectsUnparkedSNI(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "certs")
+	s := NewServer(dir, "test")
+	// Host is inside the domain but not parked: TLS must not mint a cert.
+	if _, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "ghost.test"}); err == nil {
+		t.Fatal("issued cert for unparked host")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "ghost.test.pem")); !os.IsNotExist(err) {
+		t.Fatalf("unparked host has a certificate: %v", err)
+	}
+	// After parking, the same SNI works and is cached.
+	if err := s.Router.Add(Site{Name: "ghost.test", Root: "/srv/ghost", PHPSocket: "/run/fpm.sock"}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "ghost.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "ghost.test"})
+	if err != nil || first != second {
+		t.Fatalf("certificate was not cached: %v", err)
+	}
+	// Unparking revokes it even for a warm cache.
+	s.Router.Remove("ghost.test")
+	if _, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "ghost.test"}); err == nil {
+		t.Fatal("cached cert served after unlink")
+	}
+}
+
+func TestSafeStaticFileRejectsEscapingSymlinks(t *testing.T) {
+	root := t.TempDir()
+	docRoot := filepath.Join(root, "public")
+	if err := os.MkdirAll(filepath.Join(docRoot, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(docRoot, "inside.txt")
+	outside := filepath.Join(root, "secret.txt")
+	os.WriteFile(inside, []byte("inside"), 0o644)
+	os.WriteFile(outside, []byte("SECRET"), 0o644)
+
+	if _, ok := safeStaticFile(docRoot, "inside.txt"); !ok {
+		t.Fatal("regular file inside docRoot rejected")
+	}
+	if err := os.Symlink(outside, filepath.Join(docRoot, "escape.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := safeStaticFile(docRoot, "escape.txt"); ok {
+		t.Fatal("symlink escaping docRoot accepted")
+	}
+	if err := os.Symlink(inside, filepath.Join(docRoot, "sub", "ok.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := safeStaticFile(docRoot, "sub/ok.txt"); !ok {
+		t.Fatal("symlink inside docRoot rejected")
+	}
+	if _, ok := safeStaticFile(docRoot, "../secret.txt"); ok {
+		t.Fatal("traversal accepted")
+	}
+}
+
+func TestPHPFStderrIsNotServed(t *testing.T) {
+	dir := t.TempDir()
+	sock := filepath.Join(dir, "fpm.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		for {
+			typ, _, err := readRec(conn)
+			if err != nil || typ == 5 {
+				break
+			}
+		}
+		writeRec(conn, 6, []byte("Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nOK"))
+		writeRec(conn, 7, []byte("DB_PASSWORD=super-secret-stack-trace"))
+		end := make([]byte, 8)
+		writeRec(conn, 3, end)
+	}()
+	s := NewServer(filepath.Join(dir, "certs"), "test")
+	s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: sock})
+	req := httptest.NewRequest(http.MethodGet, "http://acme.test/index.php", nil)
+	req.Host = "acme.test"
+	rr := httptest.NewRecorder()
+	s.ServeHTTP(rr, req)
+	if rr.Code != 200 || rr.Body.String() != "OK" {
+		t.Fatalf("response = %d %q", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "super-secret") {
+		t.Fatalf("PHP-FPM stderr leaked: %q", rr.Body.String())
+	}
+}
+
+func TestServerUsesConfiguredBind(t *testing.T) {
+	s := NewServer(t.TempDir(), "test")
+	s.HTTPPort, s.HTTPSPort = 18080, 18443
+	s.Bind = "0.0.0.0"
+	if err := s.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer s.Shutdown(context.Background())
+	if s.httpServer.Addr != "0.0.0.0:18080" || s.httpsServer.Addr != "0.0.0.0:18443" {
+		t.Fatalf("addrs = %q / %q", s.httpServer.Addr, s.httpsServer.Addr)
+	}
+	s.Bind = "not-an-address"
+	if err := s.Start(); err == nil {
+		t.Fatal("invalid bind address accepted")
 	}
 }
 

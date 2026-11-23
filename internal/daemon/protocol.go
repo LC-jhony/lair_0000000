@@ -4,6 +4,11 @@
 // a single source of truth.
 package daemon
 
+import (
+	"github.com/lair-sh/lair/internal/engine"
+	"github.com/lair-sh/lair/internal/project"
+)
+
 // Action names.
 const (
 	ActionStatus           = "status"
@@ -14,6 +19,17 @@ const (
 	ActionJob              = "job"
 	ActionJobs             = "jobs"
 	ActionJobCancel        = "job-cancel"
+	ActionJobRetry         = "job-retry"
+	ActionPHPUninstall     = "php-uninstall"
+	ActionNodeUpdate       = "node-update"
+	ActionNodeUninstall    = "node-uninstall"
+	ActionComposerUpdate   = "composer-update"
+	ActionExtAdd           = "ext-add"
+	ActionExtRequired      = "ext-required"
+	ActionNpmUpdate        = "npm-update"
+	ActionIsolated         = "isolated"
+	ActionUnpin            = "unpin"
+	ActionUnisolate        = "unisolate"
 	ActionLogs             = "logs"
 	ActionLogsList         = "logs-list"
 	ActionPHPUse           = "php-use"
@@ -29,13 +45,20 @@ const (
 	ActionLink             = "link"
 	ActionUnlink           = "unlink"
 	ActionSecure           = "secure"
+	ActionWeb              = "web"
+	ActionProject          = "project"
 	ActionPin              = "pin"
 	ActionIsolate          = "isolate"
 	ActionUpdate           = "update"
 	ActionBootstrap        = "bootstrap"
+	ActionEnsureShims      = "ensure-shims"
 	ActionUninstall        = "uninstall"
 	ActionRestart          = "restart"
 	ActionShutdown         = "shutdown"
+	ActionMail             = "mail"
+	ActionDumps            = "dumps"
+	ActionDebugger         = "debugger"
+	ActionSite             = "site"
 )
 
 // VersionRequest asks for the versions available for a package.
@@ -48,11 +71,28 @@ type VersionResult struct {
 	Versions []string `json:"versions"`
 }
 
+// WebRequest and WebResult are the wire payloads for the single web action
+// shared by the desktop app, the TUI and the CLI. Supported ops are status,
+// configure, https-on and https-off; the ports, bind and domain are configured
+// through "configure" (or the CLI's http/https-port/bind/domain shorthands).
+type WebRequest = engine.WebRequest
+type WebResult = engine.WebResult
+
+// ProjectRequest and ProjectResult are the wire payloads of the single project
+// action: `info` reports capabilities and `create` starts a job that is polled
+// with job/logs/job-cancel.
+type ProjectRequest = project.ControlRequest
+
+type ProjectResult = project.Result
+
 // InstallRequest installs one tool or service version.
 type InstallRequest struct {
 	Version string `json:"version"`
 	ID      string `json:"id,omitempty"`
 	Port    int    `json:"port,omitempty"`
+	// From selects a local directory or archive instead of a signed download.
+	// Local builds are probed before being placed, like downloaded ones.
+	From string `json:"from,omitempty"`
 }
 
 // JobRequest references a job id.
@@ -65,15 +105,45 @@ type LogsRequest struct {
 	Name string `json:"name"`
 }
 
+// SecureRequest toggles HTTPS for one site. On nil means "enable" for
+// compatibility with older clients that only send a name.
+type SecureRequest struct {
+	Name string `json:"name"`
+	On   *bool  `json:"on,omitempty"`
+}
+
 // LogsResult is the contents of a log file.
 type LogsResult struct {
 	Text string `json:"text"`
 }
 
-// NameList is a reusable list of names.
+// NameList is a reusable list of names. Sources is populated by `logs-list`
+// so a client can offer a tree of site and service logs; Items stays unchanged
+// for older clients that only need the contents of LAIR_HOME/log.
 type NameList struct {
-	Items []string `json:"items"`
+	Items   []string    `json:"items"`
+	Sources []LogSource `json:"sources,omitempty"`
 }
+
+// LogSource describes one group of discoverable logs (sites or services).
+type LogSource = engine.LogSource
+
+// Mail, dumps and debugger share their wire types with the engine, which owns
+// the long-lived components. Aliases keep a single source of truth for the
+// JSON contract used by the desktop app, the TUI and the CLI.
+type MailRequest = engine.MailRequest
+type MailResult = engine.MailResult
+type MailMessage = engine.MailMessage
+type MailAttachment = engine.MailAttachment
+
+type DumpsRequest = engine.DumpsRequest
+type DumpsResult = engine.DumpsResult
+type DumpsOptions = engine.DumpsOptions
+type DumpEvent = engine.DumpEvent
+
+type DebuggerRequest = engine.DebuggerRequest
+type DebuggerResult = engine.DebuggerResult
+type DebuggerVersion = engine.DebuggerVersion
 
 // PHPUseRequest sets the default PHP minor line.
 type PHPUseRequest struct {
@@ -125,6 +195,21 @@ type LinkRequest struct {
 	Path string `json:"path"`
 }
 
+// UnlinkRequest removes a site from routing. DeleteFiles is opt-in: older
+// clients only send `name` and keep their files untouched.
+type UnlinkRequest struct {
+	Name        string `json:"name"`
+	DeleteFiles bool   `json:"delete_files,omitempty"`
+}
+
+// Site, mail, dumps and debugger share their wire types with the engine, which
+// owns the long-lived state. Aliases keep a single source of truth for the JSON
+// contract used by the desktop app, the TUI and the CLI.
+type SiteRequest = engine.SiteRequest
+type SiteResult = engine.SiteResult
+type SiteDetail = engine.SiteDetail
+type SiteEnvEntry = engine.SiteEnvEntry
+
 // PathRequest carries a filesystem path.
 type PathRequest struct {
 	Path string `json:"path"`
@@ -144,9 +229,30 @@ type IsolateRequest struct {
 	Dir   string `json:"dir,omitempty"`
 }
 
+// ExtRequest names a PHP extension and the project that requires it.
+type ExtRequest struct {
+	Ext string `json:"ext"`
+	Dir string `json:"dir,omitempty"`
+}
+
+// ExtensionInfo lists ext-* requirements and the ones missing from the PHP
+// selected for a project.
+type ExtensionInfo struct {
+	Required []string `json:"required"`
+	Missing  []string `json:"missing"`
+}
+
 // BootstrapRequest installs the local shims, profiles and Composer phar.
 type BootstrapRequest struct {
 	LairBinary string `json:"lair_binary"`
+	Home       string `json:"home,omitempty"`
+}
+
+// EnsureShimsRequest regenerates the shims and PATH snippets. It is called by
+// every interface after a runtime install, not only by the CLI, so `node -v`
+// works regardless of which UI performed the installation.
+type EnsureShimsRequest struct {
+	LairBinary string `json:"lair_binary,omitempty"`
 	Home       string `json:"home,omitempty"`
 }
 

@@ -13,11 +13,32 @@ import (
 	"sync"
 )
 
-// Site describes one parked development site.
+// Site describes one parked development site. The first fields are the stable
+// routing contract; the rest are tolerant descriptive fields filled by the
+// engine from config, .env and the filesystem. Clients may ignore them.
 type Site struct {
-	Name      string // canonical host, e.g. "acme.test"
-	Root      string // project root (contains public/)
-	PHPSocket string // unix socket of this site's FPM pool
+	Name      string `json:"name"`       // canonical host, e.g. "acme.test"
+	Root      string `json:"root"`       // project root (contains public/)
+	PHPSocket string `json:"php_socket"` // unix socket of this site's FPM pool
+	Secure    bool   `json:"secure"`     // a local CA certificate has been issued for this host
+	Enabled   bool   `json:"enabled"`    // false keeps the site registered but removes its vhost
+	PHP       string `json:"php,omitempty"`
+	Node      string `json:"node,omitempty"`
+	Database  string `json:"database,omitempty"`
+
+	Type            string   `json:"type,omitempty"`
+	Framework       string   `json:"framework,omitempty"`
+	PHPVersion      string   `json:"php_version,omitempty"`
+	PHPSource       string   `json:"php_source,omitempty"`
+	PHPFile         string   `json:"php_file,omitempty"`
+	NodeSource      string   `json:"node_source,omitempty"`
+	NodeFile        string   `json:"node_file,omitempty"`
+	RootState       string   `json:"root_state,omitempty"`
+	RootSuggestions []string `json:"root_suggestions,omitempty"`
+	Domains         []string `json:"domains,omitempty"`
+	Problem         string   `json:"problem,omitempty"`
+	Notice          string   `json:"notice,omitempty"`
+	URL             string   `json:"url,omitempty"`
 }
 
 // Router maps request hosts to sites in a concurrency-safe way.
@@ -38,6 +59,18 @@ func (r *Router) Add(site Site) error {
 	defer r.mu.Unlock()
 	r.sites[strings.ToLower(strings.TrimSuffix(site.Name, "."))] = site
 	return nil
+}
+
+// SetSecure flips only the TLS flag of an existing site, keeping its root and
+// FPM socket untouched.
+func (r *Router) SetSecure(name string, secure bool) {
+	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if site, ok := r.sites[name]; ok {
+		site.Secure = secure
+		r.sites[name] = site
+	}
 }
 
 // Remove deletes a site.

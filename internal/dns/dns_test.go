@@ -3,6 +3,8 @@ package dns
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
+	"io"
 	"net"
 	"strings"
 	"testing"
@@ -78,9 +80,10 @@ func TestResolveLocalARecord(t *testing.T) {
 	if net.IP(ans[12:16]).String() != "127.0.0.1" {
 		t.Fatalf("A record = %s", net.IP(ans[12:16]).String())
 	}
-	// AAAA
+	// AAAA must be NODATA so the browser uses the IPv4 address the web
+	// server actually listens on.
 	resp, _ = s.Resolve(buildQuery("acme.test", typeAAAA))
-	if binary.BigEndian.Uint16(resp[6:8]) != 1 {
+	if binary.BigEndian.Uint16(resp[6:8]) != 0 {
 		t.Fatal("AAAA answer count wrong")
 	}
 }
@@ -96,6 +99,22 @@ func TestResolveIfLocal(t *testing.T) {
 	_, local, _ = s.ResolveIfLocal(buildQuery("example.com", typeA))
 	if local {
 		t.Fatal("example.com treated as local")
+	}
+}
+
+func TestBuildResponseMirrorsQueryFlags(t *testing.T) {
+	query := buildQuery("demo-lair.test", typeA)
+	binary.BigEndian.PutUint16(query[2:4], 0x0110) // RD + CD, as sent by systemd-resolved
+	resp, err := BuildResponse(query, ARecord([4]byte{127, 0, 0, 1}, 60))
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags := binary.BigEndian.Uint16(resp[2:4])
+	if flags&0x0110 != 0x0110 {
+		t.Fatalf("response flags = %#04x, want RD and CD preserved", flags)
+	}
+	if flags&0x8400 != 0x8400 || flags&0x0080 == 0 {
+		t.Fatalf("response flags = %#04x, want QR and AA and RA", flags)
 	}
 }
 
@@ -127,6 +146,56 @@ func TestForwardToUpstream(t *testing.T) {
 	ans := resp[qEnd+4:]
 	if net.IP(ans[12:16]).String() != "1.2.3.4" {
 		t.Fatalf("forwarded A = %s", net.IP(ans[12:16]).String())
+	}
+}
+
+func TestTCPListenAndServe(t *testing.T) {
+	probe, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Skip("no UDP")
+	}
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	probe.Close()
+
+	s := NewServer("test", port)
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.ListenAndServe(ctx) }()
+	defer func() { cancel(); s.Close() }()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	var conn net.Conn
+	for i := 0; i < 50; i++ {
+		conn, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("TCP DNS listener never came up: %v", err)
+	}
+	defer conn.Close()
+
+	query := buildQuery("demo-lair.test", typeA)
+	binary.BigEndian.PutUint16(query[2:4], 0x0100) // RD, as systemd-resolved sends
+	msg := make([]byte, 2+len(query))
+	binary.BigEndian.PutUint16(msg[:2], uint16(len(query)))
+	copy(msg[2:], query)
+	if _, err := conn.Write(msg); err != nil {
+		t.Fatal(err)
+	}
+	var size [2]byte
+	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		t.Fatal(err)
+	}
+	resp := make([]byte, binary.BigEndian.Uint16(size[:]))
+	if _, err := io.ReadFull(conn, resp); err != nil {
+		t.Fatal(err)
+	}
+	_, qEnd, _ := readName(resp, 12)
+	if net.IP(resp[qEnd+4+12:qEnd+4+16]).String() != "127.0.0.1" {
+		t.Fatalf("TCP A = %v", resp[qEnd+4+12:qEnd+4+16])
 	}
 }
 

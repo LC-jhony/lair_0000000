@@ -3,7 +3,9 @@ package dns
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -28,6 +30,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	upstream *net.UDPConn
+	tcpLn    net.Listener
 	closed   bool
 }
 
@@ -67,7 +70,10 @@ func (s *Server) Resolve(query []byte) ([]byte, error) {
 		case typeA:
 			return BuildResponse(query, ARecord(s.IPv4, defaultTTL))
 		case typeAAAA:
-			return BuildResponse(query, AAAARecord(s.IPv6, defaultTTL))
+			// NODATA, like dnsmasq's address=/test/127.0.0.1. Answering AAAA
+			// ::1 makes getent prefer IPv6 while the web server listens on
+			// IPv4 only, so the browser would get ECONNREFUSED.
+			return BuildResponse(query)
 		default:
 			// NODATA: a valid empty answer rather than NXDOMAIN.
 			return BuildResponse(query)
@@ -176,6 +182,16 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	s.upstream = conn
 	s.mu.Unlock()
 
+	// systemd-resolved switches a server to TCP when it considers UDP
+	// degraded. Without a TCP listener those queries are refused with ECONNREFUSED
+	// and *.test stops resolving even though UDP works. dnsmasq serves both.
+	if tcpLn, err := net.Listen("tcp", addr.String()); err == nil {
+		s.mu.Lock()
+		s.tcpLn = tcpLn
+		s.mu.Unlock()
+		go s.serveTCP(ctx, tcpLn)
+	}
+
 	go func() {
 		<-ctx.Done()
 		_ = s.Close()
@@ -207,6 +223,54 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	}
 }
 
+// serveTCP handles the length-prefixed DNS messages used by systemd-resolved
+// when it falls back from UDP to TCP.
+func (s *Server) serveTCP(ctx context.Context, ln net.Listener) {
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go s.handleTCPConn(conn)
+	}
+}
+
+func (s *Server) handleTCPConn(conn net.Conn) {
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(defaultTimeout))
+	for {
+		var size [2]byte
+		if _, err := io.ReadFull(conn, size[:]); err != nil {
+			return
+		}
+		n := int(binary.BigEndian.Uint16(size[:]))
+		if n == 0 || n > 4096 {
+			return
+		}
+		query := make([]byte, n)
+		if _, err := io.ReadFull(conn, query); err != nil {
+			return
+		}
+		resp, err := s.Resolve(query)
+		if err != nil {
+			resp, err = BuildNXDomain(query)
+			if err != nil {
+				return
+			}
+		}
+		out := make([]byte, 2+len(resp))
+		binary.BigEndian.PutUint16(out[:2], uint16(len(resp)))
+		copy(out[2:], resp)
+		if _, err := conn.Write(out); err != nil {
+			return
+		}
+	}
+}
+
 // Close stops the DNS server.
 func (s *Server) Close() error {
 	s.mu.Lock()
@@ -215,8 +279,14 @@ func (s *Server) Close() error {
 		return nil
 	}
 	s.closed = true
+	var first error
 	if s.upstream != nil {
-		return s.upstream.Close()
+		first = s.upstream.Close()
 	}
-	return nil
+	if s.tcpLn != nil {
+		if err := s.tcpLn.Close(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }

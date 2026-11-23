@@ -10,7 +10,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lair-sh/lair/internal/fastcgi"
@@ -27,6 +29,7 @@ type Server struct {
 	Domain    string // e.g. "test"
 	HTTPPort  int
 	HTTPSPort int
+	Bind      string // 127.0.0.1 (default) or 0.0.0.0
 	Timeout   time.Duration
 
 	// FPMDial is injectable for tests; defaults to net.DialTimeout.
@@ -34,6 +37,9 @@ type Server struct {
 
 	httpServer  *http.Server
 	httpsServer *http.Server
+
+	certMu sync.Mutex
+	certs  map[string]*tls.Certificate // canonical host -> certificate
 }
 
 // NewServer creates a web server with default ports 80/443.
@@ -43,7 +49,8 @@ func NewServer(certsDir, domain string) *Server {
 	}
 	return &Server{
 		Router: NewRouter(), CertsDir: certsDir, Domain: domain,
-		HTTPPort: 80, HTTPSPort: 443, Timeout: 10 * time.Second,
+		HTTPPort: 80, HTTPSPort: 443, Bind: "127.0.0.1", Timeout: 10 * time.Second,
+		certs: map[string]*tls.Certificate{},
 	}
 }
 
@@ -61,12 +68,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		if rel := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/"); rel != "" {
 			if name := filepath.Base(rel); name != "index.php" && strings.Contains(name, ".") {
-				file := filepath.Join(docRoot, filepath.FromSlash(rel))
-				if within(docRoot, file) {
-					if info, err := os.Stat(file); err == nil && !info.IsDir() {
-						http.ServeFile(w, r, file)
-						return
-					}
+				if file, ok := safeStaticFile(docRoot, rel); ok {
+					http.ServeFile(w, r, file)
+					return
 				}
 			}
 		}
@@ -101,10 +105,39 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(resp.Status)
 	_, _ = w.Write(resp.Body)
-	if len(resp.Stderr) > 0 {
-		// Surface PHP errors in the response only in dev; never log secrets.
-		_, _ = w.Write([]byte("\n<!-- PHP-FPM stderr:\n" + string(resp.Stderr) + "\n-->"))
+	// PHP-FPM stderr is deliberately not written to the HTTP response: it can
+	// contain credentials, absolute paths and stack traces.
+}
+
+// safeStaticFile resolves a requested relative path under docRoot. Both the
+// document root and the target are symlink-resolved, so a link inside a site
+// may point to another file of the same site but never outside it (where it
+// could expose a sibling project or Lair's private CA key).
+func safeStaticFile(docRoot, rel string) (string, bool) {
+	candidate := filepath.Join(docRoot, filepath.FromSlash(rel))
+	if !within(docRoot, candidate) {
+		return "", false
 	}
+	resolvedRoot, err := filepath.EvalSymlinks(docRoot)
+	if err != nil {
+		return "", false
+	}
+	info, err := os.Lstat(candidate)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", false
+	}
+	if !within(resolvedRoot, resolved) {
+		return "", false
+	}
+	info, err = os.Stat(resolved)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
+	}
+	return resolved, true
 }
 
 // within reports whether file is inside base after cleaning (no traversal).
@@ -123,22 +156,42 @@ func (s *Server) timeout() time.Duration {
 	return 10 * time.Second
 }
 
-// getCertificate issues (on demand) and loads a certificate for the requested
-// host. The CA is local and trusted via the platform trust store.
+// getCertificate issues (on demand) and loads a certificate for a parked site.
+// The SNI host is only used to find the site; the certificate is always issued
+// for the canonical name from the router, so an arbitrary subdomain cannot
+// obtain a certificate naming a host Lair does not own. Certificates are
+// cached per canonical host to avoid re-reading/re-signing on every handshake.
 func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	host := strings.ToLower(stripPort(hello.ServerName))
-	if host == "" || !strings.HasSuffix(host, "."+s.Domain) {
+	host := pki.NormalizeHost(stripPort(hello.ServerName))
+	domain := pki.NormalizeHost(s.Domain)
+	if host == "" || domain == "" || (host != domain && !strings.HasSuffix(host, "."+domain)) {
 		return nil, fmt.Errorf("refusing to issue certificate for %q", host)
 	}
-	sans := []string{host}
-	labels := strings.Split(host, ".")
-	if len(labels) >= 3 {
-		base := strings.Join(labels[1:], ".")
-		sans = append(sans, base, "*."+base)
-	} else {
-		sans = append(sans, "*."+host)
+
+	// Re-check the router on every handshake, even for a cached host: an
+	// unlinked site must stop being served over TLS immediately.
+	site, _, ok := s.Router.Match(host)
+	if !ok {
+		return nil, fmt.Errorf("refusing to issue certificate for unparked host %q", host)
 	}
-	certPath, keyPath, err := pki.IssueSite(s.CertsDir, host, sans...)
+	canonical := pki.NormalizeHost(site.Name)
+
+	s.certMu.Lock()
+	defer s.certMu.Unlock()
+	if s.certs == nil {
+		s.certs = map[string]*tls.Certificate{}
+	}
+	if cert := s.certs[host]; cert != nil {
+		return cert, nil
+	}
+	if cert := s.certs[canonical]; cert != nil {
+		return cert, nil
+	}
+	sans := pki.SANsFor(canonical, domain)
+	if len(sans) == 0 {
+		return nil, fmt.Errorf("invalid parked site %q for domain %q", site.Name, domain)
+	}
+	certPath, keyPath, err := pki.IssueSite(s.CertsDir, canonical, sans...)
 	if err != nil {
 		return nil, err
 	}
@@ -146,11 +199,14 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 	if err != nil {
 		return nil, err
 	}
+	s.certs[canonical] = &cert
+	s.certs[host] = &cert
 	return &cert, nil
 }
 
 // Start begins serving on both ports. It returns after the listeners are
-// created; use Shutdown to stop. It binds only 127.0.0.1.
+// created; use Shutdown to stop. The bind address comes from config (loopback
+// by default); 0.0.0.0 is an explicit opt-in that exposes sites to the LAN.
 func (s *Server) Start() error {
 	if c := services.CheckPort(s.HTTPPort); c != nil {
 		return fmt.Errorf("cannot start HTTP: %s", c.String())
@@ -158,13 +214,20 @@ func (s *Server) Start() error {
 	if c := services.CheckPort(s.HTTPSPort); c != nil {
 		return fmt.Errorf("cannot start HTTPS: %s", c.String())
 	}
+	bind := strings.TrimSpace(s.Bind)
+	if bind == "" {
+		bind = "127.0.0.1"
+	}
+	if bind != "127.0.0.1" && bind != "0.0.0.0" && bind != "localhost" {
+		return fmt.Errorf("invalid bind address %q", bind)
+	}
 	s.httpServer = &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", s.HTTPPort),
+		Addr:              net.JoinHostPort(bind, strconv.Itoa(s.HTTPPort)),
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	s.httpsServer = &http.Server{
-		Addr:              fmt.Sprintf("127.0.0.1:%d", s.HTTPSPort),
+		Addr:              net.JoinHostPort(bind, strconv.Itoa(s.HTTPSPort)),
 		Handler:           s,
 		ReadHeaderTimeout: 10 * time.Second,
 		TLSConfig: &tls.Config{

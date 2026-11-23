@@ -10,9 +10,20 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
+	"time"
+)
+
+// Local API limits. A malformed or stuck client must not pin a goroutine or
+// exhaust the daemon's memory; the socket is local but still untrusted input.
+const (
+	apiReadTimeout  = 15 * time.Second
+	apiWriteTimeout = 15 * time.Second
+	apiCallTimeout  = 5 * time.Minute // a client waits longer than any single action
+	maxRequestBytes = 1 << 20         // 1 MiB
 )
 
 // Request is one API call envelope.
@@ -125,8 +136,10 @@ func (s *Server) Serve(ctx context.Context) error {
 
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(apiReadTimeout))
 	var req Request
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+	dec := json.NewDecoder(io.LimitReader(conn, maxRequestBytes))
+	if err := dec.Decode(&req); err != nil {
 		writeJSON(conn, Response{Error: "invalid request: " + err.Error()})
 		return
 	}
@@ -158,6 +171,9 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 }
 
 func writeJSON(conn net.Conn, resp Response) {
+	// The write deadline starts when the reply is ready, not when the request
+	// arrived: some actions legitimately take longer than the read timeout.
+	_ = conn.SetWriteDeadline(time.Now().Add(apiWriteTimeout))
 	_ = json.NewEncoder(conn).Encode(resp)
 }
 
@@ -178,6 +194,7 @@ func (c *Client) Call(ctx context.Context, action string, payload any, out any) 
 		return fmt.Errorf("connect to daemon: %w", err)
 	}
 	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(apiCallTimeout))
 	var raw json.RawMessage
 	if payload != nil {
 		raw, err = json.Marshal(payload)

@@ -1,11 +1,13 @@
 package pki
 
 import (
+	"bytes"
 	"crypto/x509"
 	"encoding/pem"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -90,6 +92,103 @@ func TestIssueSiteDefaultSANs(t *testing.T) {
 func TestParseCARejectsGarbage(t *testing.T) {
 	if _, _, err := ParseCA([]byte("nope"), []byte("nope")); err == nil {
 		t.Fatal("garbage CA accepted")
+	}
+}
+
+func TestEnsureCAConcurrent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "certs")
+	const n = 16
+	serials := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cert, _, err := EnsureCA(dir)
+			errs[i] = err
+			if cert != nil {
+				serials[i] = cert.SerialNumber.String()
+			}
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("EnsureCA %d: %v", i, err)
+		}
+		if serials[i] != serials[0] {
+			t.Fatalf("concurrent callers got different CAs: %v", serials)
+		}
+	}
+}
+
+func TestEnsureCABundleContainsLocalCA(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "certs")
+	cert, _, err := EnsureCA(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(BundlePath(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+	if !bytes.Contains(data, certPEM) {
+		t.Fatal("ca-bundle.pem does not contain the local CA")
+	}
+	info, _ := os.Stat(BundlePath(dir))
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("bundle mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestParseCARejectsMismatchedKey(t *testing.T) {
+	certDir := filepath.Join(t.TempDir(), "certs")
+	keyDir := filepath.Join(t.TempDir(), "other-certs")
+	if _, _, err := EnsureCA(certDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := EnsureCA(keyDir); err != nil {
+		t.Fatal(err)
+	}
+	certPEM, err := os.ReadFile(certPath(certDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignKey, err := os.ReadFile(keyPath(keyDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ParseCA(certPEM, foreignKey); err == nil {
+		t.Fatal("CA certificate accepted a key from another CA")
+	}
+}
+
+func certPath(dir string) string {
+	p, _ := Paths(dir)
+	return p
+}
+
+func keyPath(dir string) string {
+	_, p := Paths(dir)
+	return p
+}
+
+func TestSANsForCanonicalOnly(t *testing.T) {
+	got := SANsFor("www.acme.test", "test")
+	want := []string{"www.acme.test", "*.www.acme.test"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("SANsFor = %v, want %v", got, want)
+	}
+	if SANsFor("evil.example", "test") != nil {
+		t.Fatal("host outside the domain was accepted")
+	}
+	if SANsFor("bad name.test", "test") != nil {
+		t.Fatal("host with whitespace was accepted")
+	}
+	if NormalizeHost("ACME.test.") != "acme.test" {
+		t.Fatal("host normalisation failed")
 	}
 }
 

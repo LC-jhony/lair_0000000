@@ -26,7 +26,7 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-func TestRuntimeServesUI(t *testing.T) {
+func TestRuntimeServesDesktopAPI(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv(app.EnvHome, root)
 	paths, err := app.Resolve()
@@ -37,8 +37,8 @@ func TestRuntimeServesUI(t *testing.T) {
 	cfg.EnableDNS = false
 	cfg.EnableWeb = false
 	cfg.EnableAPI = false
-	cfg.EnableUI = true
-	cfg.UIPort = freePort(t)
+	cfg.EnableDesktop = true
+	cfg.DesktopPort = freePort(t)
 
 	rt, err := New(cfg)
 	if err != nil {
@@ -52,54 +52,55 @@ func TestRuntimeServesUI(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- rt.Run(ctx) }()
 
-	urlPath := filepath.Join(paths.Run, "ui.url")
-	tokenPath := filepath.Join(paths.Run, "ui.token")
-	var url string
+	urlPath := filepath.Join(paths.Run, "desktop.url")
+	tokenPath := filepath.Join(paths.Run, "desktop.token")
+	var apiURL string
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(urlPath); err == nil && strings.TrimSpace(string(b)) != "" {
-			url = strings.TrimSpace(string(b))
+			apiURL = strings.TrimSpace(string(b))
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if url == "" {
+	if apiURL == "" {
 		cancel()
-		t.Fatalf("ui.url was not written: %v", <-errCh)
+		t.Fatalf("desktop.url was not written: %v", <-errCh)
 	}
-	if !strings.Contains(url, "#token=") {
-		t.Fatalf("url has no token fragment: %s", url)
+	if strings.Contains(apiURL, "token") {
+		t.Fatalf("base URL must not contain a token: %s", apiURL)
 	}
 	tok, err := os.ReadFile(tokenPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(url, strings.TrimSpace(string(tok))) {
-		t.Fatal("url token does not match ui.token")
+	token := strings.TrimSpace(string(tok))
+	if token == "" {
+		t.Fatal("desktop.token is empty")
 	}
 	info, err := os.Stat(tokenPath)
 	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("ui.token mode = %v, %v", info, err)
+		t.Fatalf("desktop.token mode = %v, %v", info, err)
 	}
 
-	base := strings.SplitN(url, "#", 2)[0]
-	resp, err := http.Get(base)
+	// No web UI: the root path must not serve an HTML page.
+	resp, err := http.Get(apiURL + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ := io.ReadAll(resp.Body)
+	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Lair") {
-		t.Fatalf("GET / = %d: %s", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET / = %d, want 404 (no web UI)", resp.StatusCode)
 	}
 
-	req, _ := http.NewRequest(http.MethodPost, base+"api", strings.NewReader(`{"action":"status"}`))
-	req.Header.Set("X-Lair-Token", strings.TrimSpace(string(tok)))
+	req, _ := http.NewRequest(http.MethodPost, apiURL+"/api", strings.NewReader(`{"action":"status"}`))
+	req.Header.Set("X-Lair-Token", token)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, _ = io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("POST /api = %d: %s", resp.StatusCode, body)
@@ -127,6 +128,9 @@ func TestRuntimeServesUI(t *testing.T) {
 		t.Fatal("runtime did not stop")
 	}
 	if _, err := os.Stat(urlPath); !os.IsNotExist(err) {
-		t.Fatalf("ui.url not removed on shutdown: %v", err)
+		t.Fatalf("desktop.url not removed on shutdown: %v", err)
+	}
+	if _, err := os.Stat(tokenPath); !os.IsNotExist(err) {
+		t.Fatalf("desktop.token not removed on shutdown: %v", err)
 	}
 }

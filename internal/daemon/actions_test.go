@@ -14,6 +14,8 @@ import (
 
 func testDispatcher(t *testing.T) (*Dispatcher, app.Paths) {
 	t.Helper()
+	// Keep project auto-discovery away from the real ~/lair during tests.
+	t.Setenv("HOME", t.TempDir())
 	paths, err := app.Resolve()
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +38,58 @@ func testDispatcher(t *testing.T) (*Dispatcher, app.Paths) {
 		t.Fatal(err)
 	}
 	return NewDispatcher(eng, nil), paths
+}
+
+func TestJobContextDetachesAPIRequest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	detached := jobContext(ctx)
+	cancel()
+	if detached.Err() != nil {
+		t.Fatalf("job context was cancelled with the API request: %v", detached.Err())
+	}
+}
+
+func TestDispatcherEnsureShims(t *testing.T) {
+	d, paths := testDispatcher(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		BinDir string `json:"bin_dir"`
+	}
+	// A hostile value in the wire payload must be ignored.
+	hostile := "/tmp/evil; touch /tmp/pwned"
+	if err := d.Call(context.Background(), ActionEnsureShims, EnsureShimsRequest{
+		Home: home, LairBinary: hostile,
+	}, &result); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(paths.Bin, "php"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), hostile) || !strings.Contains(string(body), exe) {
+		t.Fatalf("shim embeds payload binary instead of daemon executable: %s", body)
+	}
+	if result.BinDir != paths.Bin {
+		t.Fatalf("bin_dir = %q, want %q", result.BinDir, paths.Bin)
+	}
+	for _, tool := range []string{"node", "npm", "npx"} {
+		info, err := os.Stat(filepath.Join(paths.Bin, tool))
+		if err != nil {
+			t.Fatalf("shim %s: %v", tool, err)
+		}
+		if info.Mode()&0o111 == 0 {
+			t.Fatalf("shim %s is not executable", tool)
+		}
+	}
+	body, err = os.ReadFile(filepath.Join(home, ".bashrc"))
+	if err != nil || !strings.Contains(string(body), paths.Bin) {
+		t.Fatalf(".bashrc = %q, %v", body, err)
+	}
 }
 
 func TestDispatcherSiteLifecycle(t *testing.T) {
