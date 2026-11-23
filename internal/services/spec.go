@@ -30,6 +30,14 @@ type Spec struct {
 	EnvSnippet  string // Laravel .env snippet
 }
 
+// serviceBinary adds the Windows executable suffix to a service's binary name.
+func serviceBinary(name string) string {
+	if strings.HasPrefix(app.Platform(), "windows-") {
+		return name + ".exe"
+	}
+	return name
+}
+
 // InstallDir is <root>/services/<id>/<version>-build<N>.
 func InstallDir(paths app.Paths, id, version, build string) string {
 	return filepath.Join(paths.Services, id, version+"-build"+build)
@@ -81,8 +89,8 @@ func DefaultPort(id string) int {
 // IDs lists all supported service identifiers.
 func IDs() []string {
 	return []string{
-		"postgres", "mysql", "mariadb", "mongodb",
-		"redis", "valkey", "meilisearch", "typesense", "rustfs",
+		"postgres", "mysql", "mariadb", "mongodb", "redis", "valkey",
+		"meilisearch", "typesense", "rustfs",
 	}
 }
 
@@ -126,6 +134,10 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 			"--mysqlx=OFF",
 		}
 		s.StopSignal = "SIGTERM"
+		if strings.HasPrefix(app.Platform(), "windows-") {
+			s.StopSignal = ""
+			s.StopCmd = []string{filepath.Join(install, "bin", "mysqladmin.exe"), "-uroot", "-h127.0.0.1", "-P" + strconv.Itoa(port), "shutdown"}
+		}
 		s.ClientTools = []string{"mysql", "mysqldump"}
 		s.EnvSnippet = fmt.Sprintf("DB_CONNECTION=mysql\nDB_HOST=127.0.0.1\nDB_PORT=%d\nDB_DATABASE=laravel\nDB_USERNAME=root\nDB_PASSWORD=\n", port)
 	case "mariadb":
@@ -140,6 +152,10 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 			"--skip-log-bin",
 		}
 		s.StopSignal = "SIGTERM"
+		if strings.HasPrefix(app.Platform(), "windows-") {
+			s.StopSignal = ""
+			s.StopCmd = []string{filepath.Join(install, "bin", "mariadb-admin.exe"), "-uroot", "-h127.0.0.1", "-P" + strconv.Itoa(port), "shutdown"}
+		}
 		s.ClientTools = []string{"mysql", "mariadb", "mysqldump"}
 		s.EnvSnippet = fmt.Sprintf("DB_CONNECTION=mariadb\nDB_HOST=127.0.0.1\nDB_PORT=%d\nDB_DATABASE=laravel\nDB_USERNAME=root\nDB_PASSWORD=\n", port)
 	case "mongodb":
@@ -149,12 +165,13 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 		s.ClientTools = []string{"mongosh"}
 		s.EnvSnippet = fmt.Sprintf("DB_CONNECTION=mongodb\nDB_HOST=127.0.0.1\nDB_PORT=%d\nDB_DATABASE=laravel\n", port)
 	case "redis", "valkey":
-		binary := "valkey-server"
-		client := "valkey-cli"
-		if id == "redis" {
-			binary, client = "redis-server", "redis-cli"
+		client := "redis-cli"
+		server := "redis-server"
+		if id == "valkey" {
+			client = "valkey-cli"
+			server = "valkey-server"
 		}
-		s.Executable = filepath.Join(install, "bin", binary)
+		s.Executable = filepath.Join(install, "bin", server)
 		s.Args = []string{
 			"--port", strconv.Itoa(port),
 			"--bind", "127.0.0.1",
@@ -163,23 +180,57 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 			"--protected-mode", "yes",
 		}
 		s.StopSignal = "SIGTERM" // saves an RDB snapshot on shutdown
+		if strings.HasPrefix(app.Platform(), "windows-") {
+			s.StopSignal = ""
+			s.StopCmd = []string{filepath.Join(install, "bin", client+".exe"), "-p", strconv.Itoa(port), "shutdown"}
+		}
 		s.ClientTools = []string{client}
+		// Valkey speaks the Redis protocol, so Laravel uses the same driver.
 		s.EnvSnippet = fmt.Sprintf("CACHE_DRIVER=redis\nREDIS_HOST=127.0.0.1\nREDIS_PORT=%d\nREDIS_PASSWORD=null\n", port)
 	case "meilisearch":
-		s.Executable = filepath.Join(install, "bin", "meilisearch")
-		s.Args = []string{"--http-addr", "127.0.0.1:" + strconv.Itoa(port), "--db-path", filepath.Join(data, "data.ms"), "--no-analytics"}
+		s.Executable = filepath.Join(install, "bin", serviceBinary("meilisearch"))
+		s.Dir = data
+		s.Args = []string{
+			"--db-path", filepath.Join(data, "data.ms"),
+			"--http-addr", fmt.Sprintf("127.0.0.1:%d", port),
+			"--env", "development",
+			"--no-analytics",
+			"--upgrade-db",
+			"--dump-dir", filepath.Join(data, "dumps"),
+			"--snapshot-dir", filepath.Join(data, "snapshots"),
+		}
 		s.StopSignal = "SIGTERM"
-		s.EnvSnippet = fmt.Sprintf("SCOUT_DRIVER=meilisearch\nMEILISEARCH_HOST=http://127.0.0.1:%d\n", port)
+		s.EnvSnippet = fmt.Sprintf("SCOUT_DRIVER=meilisearch\nMEILISEARCH_HOST=http://127.0.0.1:%d\nMEILISEARCH_KEY=\n", port)
 	case "typesense":
-		s.Executable = filepath.Join(install, "bin", "typesense-server")
-		s.Args = []string{"--data-dir", data, "--api-port", strconv.Itoa(port), "--listen-address", "127.0.0.1"}
+		s.Executable = filepath.Join(install, "bin", serviceBinary("typesense-server"))
+		s.Args = []string{
+			"--data-dir", data,
+			"--api-key=lair",
+			"--api-address=127.0.0.1",
+			"--api-port=" + strconv.Itoa(port),
+			"--peering-address=127.0.0.1",
+			"--peering-port=" + strconv.Itoa(port-1),
+			"--enable-cors",
+		}
 		s.StopSignal = "SIGTERM"
-		s.EnvSnippet = fmt.Sprintf("TYPESENSE_HOST=127.0.0.1\nTYPESENSE_PORT=%d\nTYPESENSE_PROTOCOL=http\n", port)
+		s.EnvSnippet = fmt.Sprintf("SCOUT_DRIVER=typesense\nTYPESENSE_HOST=127.0.0.1\nTYPESENSE_PORT=%d\nTYPESENSE_PROTOCOL=http\nTYPESENSE_API_KEY=lair\n", port)
 	case "rustfs":
-		s.Executable = filepath.Join(install, "bin", "rustfs")
-		s.Args = []string{"--address", "127.0.0.1", "--port", strconv.Itoa(port), "--console-port", strconv.Itoa(port + 1), "--data-dir", data}
+		s.Executable = filepath.Join(install, "bin", serviceBinary("rustfs"))
+		s.Dir = data
+		s.Args = []string{
+			"server",
+			"--address", fmt.Sprintf("127.0.0.1:%d", port),
+			"--console-enable",
+			"--console-address", fmt.Sprintf("127.0.0.1:%d", port+1),
+			"--access-key", "rustfsadmin",
+			"--secret-key", "rustfsadmin",
+			".",
+		}
 		s.StopSignal = "SIGTERM"
-		s.EnvSnippet = fmt.Sprintf("S3_ENDPOINT=http://127.0.0.1:%d\nS3_USE_PATH_STYLE=true\n", port)
+		if strings.HasPrefix(app.Platform(), "macos-") {
+			s.Env = append(s.Env, "DYLD_FALLBACK_LIBRARY_PATH=/usr/lib")
+		}
+		s.EnvSnippet = fmt.Sprintf("FILESYSTEM_DISK=s3\nAWS_ACCESS_KEY_ID=rustfsadmin\nAWS_SECRET_ACCESS_KEY=rustfsadmin\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET=laravel\nAWS_ENDPOINT=http://127.0.0.1:%d\nAWS_URL=http://127.0.0.1:%d/laravel\nAWS_USE_PATH_STYLE_ENDPOINT=true\n", port, port)
 	default:
 		return Spec{}, fmt.Errorf("unknown service %q", id)
 	}

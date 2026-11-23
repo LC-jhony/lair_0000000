@@ -71,6 +71,36 @@ func testSpec() services.Spec {
 	return services.Spec{ID: "postgres", Executable: "/bin/true", Args: []string{"-p", "5432"}, Env: []string{"A=1"}, Dir: "/tmp"}
 }
 
+func TestContextCancellationSignalsBlockedProcess(t *testing.T) {
+	runner := &fakeRunner{}
+	s := New(testSpec(), runner)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx) }()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !s.State().Running {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !s.State().Running {
+		t.Fatal("process was not started")
+	}
+	cancel()
+	// The supervisor's watcher goroutine must signal the process even though
+	// Wait() is still blocked.
+	proc := runner.procs[0]
+	select {
+	case <-proc.signals:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancellation did not stop the blocked process")
+	}
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("supervisor did not exit after cancellation")
+	}
+}
+
 func TestRestartsWithBackoffAndRecordsError(t *testing.T) {
 	r := &fakeRunner{autoErr: errors.New("crashed")}
 	s := New(testSpec(), r)

@@ -38,7 +38,7 @@ func (p *osProcess) Signal(sig os.Signal) error {
 	return p.cmd.Process.Signal(sig)
 }
 
-func signalStop(p Process) error { return p.Signal(syscall.SIGTERM) }
+func signalStop(p Process, _ services.Spec) error { return p.Signal(syscall.SIGTERM) }
 
 // OSRunner starts services in their own process groups with logs on disk.
 type OSRunner struct{ LogDir string }

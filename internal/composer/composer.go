@@ -24,19 +24,39 @@ const (
 	DefaultChecksumURL = "https://getcomposer.org/download/latest-stable/composer.phar.sha256"
 )
 
-// Installer downloads and verifies composer.phar.
+// Installer downloads and verifies composer.phar. Expected is the SHA-256
+// published in Lair's signed catalog; when set it takes precedence over the
+// live ChecksumURL, so the exact approved version is always installed.
 type Installer struct {
 	DownloadURL string
 	ChecksumURL string
+	Expected    string
+	Version     string
 	HTTP        *http.Client
+}
+
+// InstalledVersion reads the version marker written next to composer.phar.
+func InstalledVersion(toolsDir string) string {
+	data, err := os.ReadFile(filepath.Join(toolsDir, "composer.version"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // Ensure installs composer.phar at tools/composer.phar unless a verified copy
 // already exists. The final write is .tmp + atomic rename.
 func (i *Installer) Ensure(ctx context.Context, toolsDir string) (string, error) {
 	target := filepath.Join(toolsDir, "composer.phar")
-	if _, err := os.Stat(target); err == nil {
-		return target, nil
+	if data, err := os.ReadFile(target); err == nil {
+		// A pinned catalog checksum is authoritative: replace a phar installed
+		// by an older Lair release (or downloaded from latest-stable).
+		if i.Expected == "" || EqualChecksum(hex.EncodeToString(sha256Of(data)), i.Expected) {
+			if i.Version != "" {
+				_ = os.WriteFile(filepath.Join(toolsDir, "composer.version"), []byte(i.Version+"\n"), 0o644)
+			}
+			return target, nil
+		}
 	}
 	if err := os.MkdirAll(toolsDir, 0o755); err != nil {
 		return "", err
@@ -49,14 +69,20 @@ func (i *Installer) Ensure(ctx context.Context, toolsDir string) (string, error)
 	if dlURL == "" {
 		dlURL = DefaultDownloadURL
 	}
-	sumURL := i.ChecksumURL
-	if sumURL == "" {
-		sumURL = DefaultChecksumURL
-	}
 
-	want, err := fetchChecksum(ctx, client, sumURL)
-	if err != nil {
-		return "", fmt.Errorf("fetch composer checksum: %w", err)
+	var want string
+	if i.Expected != "" {
+		want = i.Expected
+	} else {
+		sumURL := i.ChecksumURL
+		if sumURL == "" {
+			sumURL = DefaultChecksumURL
+		}
+		var err error
+		want, err = fetchChecksum(ctx, client, sumURL)
+		if err != nil {
+			return "", fmt.Errorf("fetch composer checksum: %w", err)
+		}
 	}
 	body, err := fetch(ctx, client, dlURL)
 	if err != nil {
@@ -87,7 +113,28 @@ func (i *Installer) Ensure(ctx context.Context, toolsDir string) (string, error)
 	if err := os.Rename(name, target); err != nil {
 		return "", err
 	}
+	if i.Version != "" {
+		if err := os.WriteFile(filepath.Join(toolsDir, "composer.version"), []byte(i.Version+"\n"), 0o644); err != nil {
+			return "", err
+		}
+	}
 	return target, nil
+}
+
+// Update forces a fresh, verified download even when a phar already exists.
+// The old file is removed first; Ensure still writes to .tmp and renames, so
+// a failed download leaves no truncated composer.phar behind.
+func (i *Installer) Update(ctx context.Context, toolsDir string) (string, error) {
+	if err := os.Remove(filepath.Join(toolsDir, "composer.phar")); err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	_ = os.Remove(filepath.Join(toolsDir, "composer.version"))
+	return i.Ensure(ctx, toolsDir)
+}
+
+func sha256Of(data []byte) []byte {
+	sum := sha256.Sum256(data)
+	return sum[:]
 }
 
 // EqualChecksum compares a checksum tolerating surrounding whitespace and

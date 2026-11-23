@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/lair-sh/lair/internal/app"
+	"github.com/lair-sh/lair/internal/pki"
 )
 
 func testPaths(t *testing.T) app.Paths {
@@ -46,11 +47,14 @@ func TestINICreatedOnceAndPreserved(t *testing.T) {
 		!strings.Contains(string(data), "openssl.cafile") {
 		t.Fatalf("ini missing defaults: %s", data)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "conf.d-cli", "30-pcov.ini")); err != nil {
-		t.Fatal("pcov ini missing")
+	for _, scanDir := range []string{"conf.d-cli", "conf.d-xdebug"} {
+		info, err := os.Stat(filepath.Join(dir, scanDir))
+		if err != nil || !info.IsDir() {
+			t.Fatalf("scan dir %s missing: %v", scanDir, err)
+		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "conf.d-xdebug", "20-xdebug.ini")); err != nil {
-		t.Fatal("xdebug ini missing")
+	if strings.Contains(string(data), "extension = ") {
+		t.Fatal("static PHP ini must not load dynamic extensions")
 	}
 
 	// Simulate a user edit, then "upgrade": ini must survive.
@@ -80,6 +84,21 @@ func TestInstalledAndMarker(t *testing.T) {
 	}
 	if got[0].Minor != "8.4" {
 		t.Fatalf("not sorted newest first: %+v", got)
+	}
+}
+
+func TestEnvUsesCombinedCABundleWhenPresent(t *testing.T) {
+	p := testPaths(t)
+	EnsureDirs(t, p)
+	bundle := pki.BundlePath(p.Certs)
+	if err := os.WriteFile(bundle, []byte("bundle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info := Info{Version: "8.4.3", Minor: "8.4", Dir: filepath.Join(p.PHP, "8.4")}
+	env := strings.Join(Env(info, p), " ")
+	if !strings.Contains(env, "SSL_CERT_FILE="+bundle) ||
+		!strings.Contains(env, "CURL_CA_BUNDLE="+bundle) {
+		t.Fatalf("env = %v", env)
 	}
 }
 

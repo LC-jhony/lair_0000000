@@ -78,7 +78,7 @@ func (s *Supervisor) Update(spec services.Spec) error {
 		default:
 		}
 		if proc != nil {
-			_ = signalStop(proc)
+			_ = signalStop(proc, s.spec)
 		}
 	}
 	return nil
@@ -133,6 +133,18 @@ func (s *Supervisor) appendTail(lines ...string) {
 
 // Run supervises until ctx is cancelled or Stop is called. It blocks.
 func (s *Supervisor) Run(ctx context.Context) error {
+	// Wait() on a native process can block forever (a stuck daemon ignores
+	// SIGTERM). Signal the current process as soon as the context is cancelled
+	// so the loop can notice; runDone prevents a goroutine leak on normal exit.
+	runDone := make(chan struct{})
+	defer close(runDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = s.stop()
+		case <-runDone:
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -205,7 +217,7 @@ func (s *Supervisor) Stop() error {
 	s.mu.Unlock()
 	close(s.done)
 	if proc != nil {
-		return signalStop(proc)
+		return signalStop(proc, s.spec)
 	}
 	return nil
 }
@@ -216,7 +228,7 @@ func (s *Supervisor) stop() error {
 	s.current = nil
 	s.mu.Unlock()
 	if proc != nil {
-		return signalStop(proc)
+		return signalStop(proc, s.spec)
 	}
 	return nil
 }

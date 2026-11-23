@@ -27,7 +27,14 @@ func (p *osProcess) Signal(os.Signal) error {
 	return p.cmd.Process.Kill()
 }
 
-func signalStop(p Process) error { return p.Signal(os.Interrupt) }
+func signalStop(p Process, spec services.Spec) error {
+	if len(spec.StopCmd) > 0 {
+		// Windows has no signals: ask the service to shut down cleanly first.
+		cmd := exec.Command(spec.StopCmd[0], spec.StopCmd[1:]...)
+		_ = cmd.Run()
+	}
+	return p.Signal(os.Interrupt)
+}
 
 // OSRunner on Windows uses a job-free fallback: direct process control. A
 // proper Job Object is reserved for the Windows phase.

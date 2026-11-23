@@ -96,16 +96,93 @@ func GlobalPrefix(paths app.Paths, major string) string {
 	return filepath.Join(paths.Node, "global", major)
 }
 
+// CurrentLink is the stable path added to the shell PATH. It points at the
+// prefix of the default major (symlink on Unix, junction on Windows).
+func CurrentLink(paths app.Paths) string {
+	return filepath.Join(paths.Node, "global", "current")
+}
+
+// EnsureGlobal creates the per-major npm prefix and updates the `current`
+// link to it. npm installs -g into this prefix, so global CLIs survive an
+// update inside the same major line.
+func EnsureGlobal(paths app.Paths, major string) error {
+	prefix := GlobalPrefix(paths, major)
+	if err := os.MkdirAll(filepath.Join(prefix, "bin"), 0o755); err != nil {
+		return err
+	}
+	return linkCurrent(prefix, CurrentLink(paths))
+}
+
+// BinDir is where node/npm/npx live inside an installed version. Official
+// Windows zips keep the executables at the version root, tarballs use bin/.
+func BinDir(versionDir string) string {
+	if strings.HasPrefix(app.Platform(), "windows-") {
+		return versionDir
+	}
+	return filepath.Join(versionDir, "bin")
+}
+
+// Binary is the absolute path of the node executable in an installed version.
+func Binary(versionDir string) string {
+	if strings.HasPrefix(app.Platform(), "windows-") {
+		return filepath.Join(versionDir, "node.exe")
+	}
+	return filepath.Join(versionDir, "bin", "node")
+}
+
+// Expected lists the executables a Node archive must contain on this platform.
+func Expected() []string {
+	if strings.HasPrefix(app.Platform(), "windows-") {
+		return []string{"node.exe", "npm.cmd", "npx.cmd"}
+	}
+	return []string{"bin/node", "bin/npm", "bin/npx"}
+}
+
 // Env returns environment variables that point npm at the per-major prefix
-// and expose the local CA to Node TLS.
+// and expose the local CA to Node TLS. The prefix's bin directory comes first
+// so an updated npm and user-installed global CLIs win over Node's bundled
+// versions.
 func Env(paths app.Paths, versionDir, major string) []string {
 	caFile := filepath.Join(paths.Certs, "ca.pem")
+	prefix := GlobalPrefix(paths, major)
+	path := filepath.Join(prefix, "bin") + string(os.PathListSeparator) +
+		BinDir(versionDir) + string(os.PathListSeparator) + os.Getenv("PATH")
 	return []string{
 		"NODE_EXTRA_CA_CERTS=" + caFile,
-		"NPM_CONFIG_PREFIX=" + GlobalPrefix(paths, major),
-		"PATH=" + filepath.Join(versionDir, "bin") + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"NPM_CONFIG_PREFIX=" + prefix,
+		"PATH=" + path,
 	}
 }
+
+// RemoveOlderInMajor deletes older versions of the same major, keeping one
+// version per major as required by the catalog. It never touches other majors
+// or the global prefix directories.
+func RemoveOlderInMajor(paths app.Paths, keep string) error {
+	keepParsed, err := ParseMajor(keep)
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(paths.Node)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == "global" || entry.Name() == keep {
+			continue
+		}
+		major, err := ParseMajor(entry.Name())
+		if err != nil || major != keepParsed {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(paths.Node, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ParseMajor returns the major line of a version string.
+func ParseMajor(v string) (string, error) { return MajorOf(v) }
 
 // MajorOf returns the major line of a version string.
 func MajorOf(v string) (string, error) {

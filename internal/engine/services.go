@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lair-sh/lair/internal/app"
 	"github.com/lair-sh/lair/internal/config"
@@ -26,9 +27,19 @@ type ServiceView struct {
 	Running   bool     `json:"running"`
 	PID       int      `json:"pid"`
 	LastError string   `json:"last_error,omitempty"`
+	// Availability is relative to the machine running the daemon: a service
+	// with no signed artifact for the current platform can still be listed so
+	// the UI can explain why it cannot be installed here.
+	Available         bool   `json:"available"`
+	Platform          string `json:"platform"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
-func servicesList() []string { return services.IDs() }
+func servicesList() []string {
+	// sqlite3 is a catalog CLI tool, shown alongside services so SQLite is
+	// discoverable from the same tab, but it has no supervisor or data dir.
+	return append(services.IDs(), SQLiteToolID)
+}
 
 func (e *Engine) installedServiceVersions(id string) []string {
 	dir := filepath.Join(e.Paths.Services, id)
@@ -55,7 +66,30 @@ func (e *Engine) installedServiceVersions(id string) []string {
 	return out
 }
 
+// serviceAvailability reports whether the signed catalog has a build for the
+// current platform. The reason code lets the UI explain the absence instead
+// of silently hiding the service.
+func (e *Engine) serviceAvailability(id string) (bool, string) {
+	if ok, reason := services.Availability(id, app.Platform()); !ok {
+		return false, reason
+	}
+	versions, err := e.available(id)
+	if err != nil || len(versions) == 0 {
+		return false, "no-build"
+	}
+	return true, ""
+}
+
 func (e *Engine) serviceView(c *config.Config, id string) ServiceView {
+	if id == SQLiteToolID {
+		available, reason := e.serviceAvailability(id)
+		return ServiceView{
+			ID: id, Active: e.installedToolVersion(id),
+			Installed: e.installedToolVersions(id),
+			Available: available, UnavailableReason: reason,
+			Platform: app.Platform(),
+		}
+	}
 	port := c.Ports[id]
 	if port == 0 {
 		port = services.DefaultPort(id)
@@ -63,7 +97,9 @@ func (e *Engine) serviceView(c *config.Config, id string) ServiceView {
 	v := ServiceView{
 		ID: id, Active: c.Defaults[id], Port: port,
 		Installed: e.installedServiceVersions(id),
+		Available: true, Platform: app.Platform(),
 	}
+	v.Available, v.UnavailableReason = e.serviceAvailability(id)
 	if st, ok := e.Supervisors.State(id); ok {
 		v.Running, v.PID, v.LastError = st.Running, st.PID, st.LastError
 	}
@@ -85,12 +121,14 @@ func expectedFor(id string) []string {
 		return []string{"bin/redis-server"}
 	case "valkey":
 		return []string{"bin/valkey-server"}
-	case "meilisearch":
-		return []string{"bin/meilisearch"}
-	case "typesense":
-		return []string{"bin/typesense-server"}
-	case "rustfs":
-		return []string{"bin/rustfs"}
+	case "meilisearch", "typesense", "rustfs":
+		name := map[string]string{
+			"meilisearch": "meilisearch", "typesense": "typesense-server", "rustfs": "rustfs",
+		}[id]
+		if strings.HasPrefix(app.Platform(), "windows-") {
+			name += ".exe"
+		}
+		return []string{"bin/" + name}
 	default:
 		return nil
 	}
@@ -99,6 +137,9 @@ func expectedFor(id string) []string {
 // InstallService downloads and initialises a service version. Installing a new
 // version never changes the active one unless it is the first installation.
 func (e *Engine) InstallService(ctx context.Context, id, request string, port int) (*installer.Job, error) {
+	if id == SQLiteToolID {
+		return e.InstallTool(ctx, id, request)
+	}
 	if !serviceKnown(id) {
 		return nil, fmt.Errorf("unknown service %q", id)
 	}
@@ -114,7 +155,11 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 	if err != nil {
 		return nil, err
 	}
-	if port == 0 {
+	// PostgreSQL owns its conventional port; changing it after install would
+	// break the documented Laravel defaults, so the installer never offers it.
+	if id == "postgres" {
+		port = services.DefaultPort(id)
+	} else if port == 0 {
 		port = services.DefaultPort(id)
 	}
 	// One active version per port: reject a port already assigned to a
@@ -127,7 +172,24 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 		}
 	}
 	if conflict := services.CheckPort(port); conflict != nil {
-		return nil, fmt.Errorf("%s", conflict.String())
+		// Installing a newer version of a service that is already running on
+		// its own port must work (that is what `services update` does). Stop
+		// our supervised instance, then re-check in case the port is still
+		// held by something else.
+		if st, ok := e.Supervisors.State(id); ok && st.Running {
+			_ = e.StopService(id)
+			// A graceful shutdown releases the port asynchronously.
+			for i := 0; i < 20; i++ {
+				conflict = services.CheckPort(port)
+				if conflict == nil {
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+		if conflict != nil {
+			return nil, fmt.Errorf("%s", conflict.String())
+		}
 	}
 	dest := services.InstallDir(e.Paths, id, picked, art.Build)
 	job, err := e.Installer.Start(ctx, installer.Request{
@@ -135,7 +197,7 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 		Artifact: art, Dest: dest, Expected: expectedFor(id),
 		ConfigKey: id + "/" + picked,
 		OnSuccess: func(dir string) error {
-			return e.initService(id, picked, art.Build, port)
+			return e.initService(ctx, id, picked, art.Build, port)
 		},
 	})
 	if err != nil {
@@ -146,7 +208,7 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 
 // initService prepares data and records defaults. It runs inside the install
 // job after the binary is in place.
-func (e *Engine) initService(id, ver, build string, port int) error {
+func (e *Engine) initService(ctx context.Context, id, ver, build string, port int) error {
 	data := services.DataPath(e.Paths, id, ver)
 	if err := services.EnsureDataDir(e.Paths, id, data); err != nil {
 		return fmt.Errorf("prepare data dir: %w", err)
@@ -163,7 +225,11 @@ func (e *Engine) initService(id, ver, build string, port int) error {
 			return err
 		}
 		if len(argv) > 0 {
-			cmd := exec.Command(argv[0], argv[1:]...)
+			// Database init can prompt or wait forever on a broken binary.
+			// Bound it and honour cancellation of the parent install job.
+			initCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			cmd := exec.CommandContext(initCtx, argv[0], argv[1:]...)
 			cmd.Dir = workDir
 			cmd.Env = append(os.Environ(), "HOME="+e.Paths.Root, "LC_ALL=C")
 			out, err := cmd.CombinedOutput()
@@ -295,8 +361,15 @@ func (e *Engine) UninstallService(id, ver string, deleteData bool) error {
 	})
 }
 
-// CreateDatabase runs the service's create-db command.
+// CreateDatabase runs the service's create-db command with a default timeout.
 func (e *Engine) CreateDatabase(id, name string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return e.CreateDatabaseContext(ctx, id, name)
+}
+
+// CreateDatabaseContext is CreateDatabase with caller-controlled cancellation.
+func (e *Engine) CreateDatabaseContext(ctx context.Context, id, name string) (string, error) {
 	spec, err := e.ServiceSpec(id)
 	if err != nil {
 		return "", err
@@ -305,7 +378,7 @@ func (e *Engine) CreateDatabase(id, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, argv[0], argv[1:]...).CombinedOutput()
 	return string(out), err
 }
 

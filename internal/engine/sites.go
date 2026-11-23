@@ -43,6 +43,11 @@ func (e *Engine) Link(name, projectPath string) error {
 	}
 	if err := e.Config.Update(func(c *config.Config) error {
 		s := c.Sites[name]
+		// A brand-new site starts enabled; re-linking an existing one keeps
+		// its current flag (including an explicit disable).
+		if s.Path == "" {
+			s.Enabled = true
+		}
 		s.Path = abs
 		c.Sites[name] = s
 		return nil
@@ -50,6 +55,7 @@ func (e *Engine) Link(name, projectPath string) error {
 		return err
 	}
 	e.reloadSites()
+	e.syncWeb()
 	return nil
 }
 
@@ -63,6 +69,7 @@ func (e *Engine) Unlink(name string) error {
 		return err
 	}
 	e.Web.Router.Remove(name)
+	e.syncWeb()
 	return nil
 }
 
@@ -73,23 +80,69 @@ func (e *Engine) Secure(name string) error {
 	if _, _, err := pki.EnsureCA(e.Paths.Certs); err != nil {
 		return err
 	}
-	sans := []string{name}
-	labels := strings.Split(name, ".")
-	if len(labels) >= 3 {
-		base := strings.Join(labels[1:], ".")
-		sans = append(sans, base, "*."+base)
-	} else {
-		sans = append(sans, "*."+name)
+	var domains []string
+	if c, err := e.Config.View(); err == nil {
+		if site, ok := c.Sites[name]; ok {
+			domains = site.Domains
+		}
+	}
+	sans := e.siteSANs(name, domains)
+	if len(sans) == 0 {
+		return fmt.Errorf("invalid site name %q for domain %q", name, e.WebSettings().Domain)
 	}
 	_, _, err := pki.IssueSite(e.Paths.Certs, name, sans...)
-	return err
+	if err != nil {
+		return err
+	}
+	e.reloadSites()
+	e.syncWeb()
+	return nil
+}
+
+// SetSiteHTTPS turns HTTPS on or off for one site. Turning it off removes the
+// local certificate; the project files are never touched.
+func (e *Engine) SetSiteHTTPS(name string, on bool) error {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	if name == "" {
+		return fmt.Errorf("invalid site name")
+	}
+	if on {
+		return e.Secure(name)
+	}
+	cert := filepath.Join(e.Paths.Certs, name+".pem")
+	key := filepath.Join(e.Paths.Certs, name+"-key.pem")
+	if err := os.Remove(cert); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(key); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	e.Web.Router.SetSecure(name, false)
+	e.syncWeb()
+	return nil
+}
+
+// SetSiteDatabase stores the database driver chosen for a site so the UI can
+// show it in the Sites card and detail pane.
+func (e *Engine) SetSiteDatabase(name, database string) error {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+	database = strings.TrimSpace(strings.ToLower(database))
+	if name == "" || database == "" {
+		return fmt.Errorf("site name and database are required")
+	}
+	return e.Config.Update(func(c *config.Config) error {
+		site := c.Sites[name]
+		site.Database = database
+		c.Sites[name] = site
+		return nil
+	})
 }
 
 // Pin writes a php= or node= key into the project's versionable .lairrc. If a
 // legacy .flockrc exists, its contents are carried over so no pin is lost.
 func (e *Engine) Pin(tool, value, projectDir string) error {
-	if tool != "php" && tool != "node" {
-		return fmt.Errorf("pin accepts only php or node")
+	if tool != "php" && tool != "node" && tool != "root" {
+		return fmt.Errorf("pin accepts only php, node or root")
 	}
 	path := filepath.Join(projectDir, ".lairrc")
 	body, err := os.ReadFile(path)
@@ -113,6 +166,52 @@ func (e *Engine) Pin(tool, value, projectDir string) error {
 	}
 	out = append(out, pfx+value)
 	return os.WriteFile(path, []byte(strings.Join(out, "\n")+"\n"), 0o644)
+}
+
+// Unpin removes a php=, node= or root= line from the project's .lairrc. It
+// leaves every other line (including comments and legacy content) untouched.
+func (e *Engine) Unpin(tool, projectDir string) error {
+	if tool != "php" && tool != "node" && tool != "root" {
+		return fmt.Errorf("unpin accepts only php, node or root")
+	}
+	path := filepath.Join(projectDir, ".lairrc")
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	prefix := tool + "="
+	lines := []string{}
+	for _, line := range strings.Split(strings.TrimSuffix(string(body), "\n"), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 1 && lines[0] == "" {
+		return os.Remove(path)
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+// PinnedRoot reads the optional root= override from a project's .lairrc.
+// The shims use it to select a different data root for that project.
+func (e *Engine) PinnedRoot(projectDir string) string {
+	for _, name := range []string{".lairrc", ".flockrc"} {
+		body, err := os.ReadFile(filepath.Join(projectDir, name))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "root=") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "root="))
+			}
+		}
+	}
+	return ""
 }
 
 // Isolate pins a version for a site in config.json (higher precedence than
@@ -172,9 +271,16 @@ func (e *Engine) IsolatedVersion(tool, projectDir string) string {
 // generated cache/log files. Service databases are preserved unless deleteData
 // is set. The reversal scripts are deliberately kept by the CLI so the user can
 // still remove the privileged system changes (unit, polkit, resolved, CA trust).
-func (e *Engine) Uninstall(home, dataDir string, deleteData bool) error {
+func (e *Engine) Uninstall(_, _ string, deleteData bool) error {
+	// Never trust paths received over the daemon API: the data root belongs to
+	// this engine and the profile snippets belong to the real user's HOME. A
+	// hostile payload must not be able to redirect the deletion elsewhere.
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		_ = shims.RemoveProfiles(home)
+	}
+	dataDir := e.Paths.Root
 	e.Supervisors.StopAll()
-	_ = shims.RemoveProfiles(home)
 
 	if deleteData {
 		return os.RemoveAll(dataDir)

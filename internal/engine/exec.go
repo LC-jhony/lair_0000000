@@ -9,6 +9,7 @@ import (
 	"github.com/lair-sh/lair/internal/composer"
 	"github.com/lair-sh/lair/internal/config"
 	"github.com/lair-sh/lair/internal/node"
+	"github.com/lair-sh/lair/internal/nvm"
 	"github.com/lair-sh/lair/internal/php"
 	"github.com/lair-sh/lair/internal/services"
 )
@@ -50,6 +51,8 @@ func (e *Engine) ResolveTool(tool, dir string) (Invocation, error) {
 		return e.resolveClient(c, "valkey", tool)
 	case "mongosh":
 		return e.resolveClient(c, "mongodb", tool)
+	case "sqlite3":
+		return e.resolveToolBinary(SQLiteToolID)
 	default:
 		return Invocation{}, fmt.Errorf("unknown tool %q", tool)
 	}
@@ -101,8 +104,25 @@ func (e *Engine) resolveComposer(c *config.Config, dir string) (Invocation, erro
 func (e *Engine) resolveNode(c *config.Config, tool, dir string) (Invocation, error) {
 	installed := e.installedNode()
 	ver, err := node.ResolveVersion(dir, e.IsolatedVersion("node", dir), c.Defaults["node"], installed)
+	if err != nil && c.Defaults["node"] != "" && len(installed) > 0 {
+		// A default pinned before moving to nvm may no longer be installed.
+		ver, err = node.ResolveVersion(dir, e.IsolatedVersion("node", dir), "", installed)
+	}
 	if err != nil {
 		return Invocation{}, err
+	}
+	// nvm-managed versions run through `lair nvm exec`, so nvm remains the
+	// owner of version selection (including .nvmrc) and PATH setup.
+	if _, ok := nvm.Installed(ver); ok {
+		bin, err := os.Executable()
+		if err != nil {
+			return Invocation{}, err
+		}
+		return Invocation{
+			Path: bin,
+			Args: []string{"nvm", "exec", ver, tool},
+			Env:  []string{"NODE_EXTRA_CA_CERTS=" + filepath.Join(e.Paths.Certs, "ca.pem")},
+		}, nil
 	}
 	major, err := node.MajorOf(ver)
 	if err != nil {

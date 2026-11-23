@@ -98,6 +98,85 @@ func TestMySQLAndMariaDBSpecs(t *testing.T) {
 	}
 }
 
+func TestRedisAndValkeySpecs(t *testing.T) {
+	p := testPaths(t)
+	for _, id := range []string{"redis", "valkey"} {
+		s, err := Build(p, id, "9.2.0", 6379, "N1")
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		joined := strings.Join(s.Args, " ")
+		for _, want := range []string{"--port 6379", "--bind 127.0.0.1", "--dir ", "--protected-mode yes", "--daemonize no"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("%s args missing %s: %s", id, want, joined)
+			}
+		}
+		if s.StopSignal != "SIGTERM" || len(s.ClientTools) != 1 {
+			t.Errorf("%s stop/tools = %q %v", id, s.StopSignal, s.ClientTools)
+		}
+		if !strings.Contains(s.EnvSnippet, "REDIS_PORT=6379") {
+			t.Errorf("%s env = %s", id, s.EnvSnippet)
+		}
+		cmd, _, err := InitCommand(p, id, "9.2.0", "N1")
+		if err != nil || len(cmd) != 0 {
+			t.Errorf("%s init = %v, %v", id, cmd, err)
+		}
+	}
+	valkey, _ := Build(p, "valkey", "9.2.0", 6379, "N1")
+	if !strings.HasSuffix(valkey.Executable, "bin/valkey-server") || valkey.ClientTools[0] != "valkey-cli" {
+		t.Fatalf("valkey binaries = %s %v", valkey.Executable, valkey.ClientTools)
+	}
+	if DefaultPort("valkey") != 6379 {
+		t.Fatal("valkey must default to 6379")
+	}
+}
+
+func TestSearchAndStorageSpecs(t *testing.T) {
+	p := testPaths(t)
+	for _, tc := range []struct {
+		id, binary string
+		port       int
+		env        string
+	}{
+		{"meilisearch", "meilisearch", 7700, "MEILISEARCH_HOST=http://127.0.0.1:7700"},
+		{"typesense", "typesense-server", 8108, "TYPESENSE_API_KEY=lair"},
+		{"rustfs", "rustfs", 9000, "AWS_ENDPOINT=http://127.0.0.1:9000"},
+	} {
+		s, err := Build(p, tc.id, "1.0.0", tc.port, "N1")
+		if err != nil {
+			t.Fatalf("%s: %v", tc.id, err)
+		}
+		if !strings.HasSuffix(s.Executable, "bin/"+tc.binary) {
+			t.Errorf("%s executable = %s", tc.id, s.Executable)
+		}
+		if !strings.Contains(strings.Join(s.Args, " "), "127.0.0.1") {
+			t.Errorf("%s does not bind loopback: %v", tc.id, s.Args)
+		}
+		if !strings.Contains(s.EnvSnippet, tc.env) {
+			t.Errorf("%s env = %s", tc.id, s.EnvSnippet)
+		}
+		if s.StopSignal != "SIGTERM" {
+			t.Errorf("%s stop signal = %q", tc.id, s.StopSignal)
+		}
+		if _, _, err := InitCommand(p, tc.id, "1.0.0", "N1"); err != nil {
+			t.Errorf("%s init: %v", tc.id, err)
+		}
+		if DefaultPort(tc.id) != tc.port {
+			t.Errorf("%s default port = %d", tc.id, DefaultPort(tc.id))
+		}
+	}
+	rust, _ := Build(p, "rustfs", "1.0.6", 9000, "N1")
+	if !strings.Contains(strings.Join(rust.Args, " "), "--console-address 127.0.0.1:9001") {
+		t.Fatalf("rustfs console = %v", rust.Args)
+	}
+	if ok, _ := Availability("typesense", "windows-x64"); ok {
+		t.Fatal("typesense must be unavailable on Windows")
+	}
+	if ok, _ := Availability("meilisearch", "linux-x64"); !ok {
+		t.Fatal("meilisearch must be available on Linux")
+	}
+}
+
 func TestDataSeparationByMajor(t *testing.T) {
 	p := testPaths(t)
 	a := DataPath(p, "postgres", "18.1")

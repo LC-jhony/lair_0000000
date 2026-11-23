@@ -11,6 +11,8 @@ import (
 func TestUninstallRemovesEverythingLairInstalled(t *testing.T) {
 	paths := testPaths(t)
 	home := t.TempDir()
+	// Uninstall deliberately uses os.UserHomeDir(), not the payload value.
+	t.Setenv("HOME", home)
 
 	dirs := []string{
 		paths.Bin,
@@ -96,8 +98,64 @@ func TestUninstallRemovesEverythingLairInstalled(t *testing.T) {
 	}
 }
 
+func TestUninstallIgnoresHostilePayloadPaths(t *testing.T) {
+	paths := testPaths(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(paths.Bin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A daemon client may send any home/data_dir it wants. Neither may be used
+	// as a deletion target: only e.Paths.Root and the real HOME are trusted.
+	victim := t.TempDir()
+	marker := filepath.Join(victim, "keep-me")
+	if err := os.WriteFile(marker, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := eng.Uninstall(victim, victim, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("hostile data_dir was deleted: %v", err)
+	}
+	if _, err := os.Stat(paths.Bin); !os.IsNotExist(err) {
+		t.Fatalf("real data root was not cleaned: %v", err)
+	}
+}
+
+func TestUninstallDeleteDataIgnoresPayloadDataDir(t *testing.T) {
+	paths := testPaths(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(paths.Services, "mariadb", "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	eng, err := New(paths, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	victim := t.TempDir()
+	marker := filepath.Join(victim, "keep-me")
+	os.WriteFile(marker, []byte("data"), 0o644)
+	if err := eng.Uninstall(victim, victim, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("hostile data_dir was deleted with --delete-data: %v", err)
+	}
+	if _, err := os.Stat(paths.Root); !os.IsNotExist(err) {
+		t.Fatalf("real data root survived --delete-data: %v", err)
+	}
+}
+
 func TestUninstallDeleteDataRemovesRoot(t *testing.T) {
 	paths := testPaths(t)
+	t.Setenv("HOME", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(paths.Services, "mariadb", "data", "11.8"), 0o755); err != nil {
 		t.Fatal(err)
 	}

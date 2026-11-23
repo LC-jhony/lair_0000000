@@ -1,11 +1,13 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // OwnerFunc reports which program listens on a loopback port. It is a
@@ -65,7 +67,9 @@ func (c *PortConflict) String() string {
 // defaultPortOwner uses `ss -ltnp` when available (best effort). It never
 // fails the install: an unknown owner is rendered as "another program".
 func defaultPortOwner(port int) string {
-	out, err := exec.Command("ss", "-ltnp").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ss", "-ltnp").Output()
 	if err != nil {
 		return ""
 	}
