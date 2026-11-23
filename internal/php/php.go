@@ -64,7 +64,11 @@ func Installed(paths app.Paths) ([]Info, error) {
 			continue
 		}
 		m.Minor = e.Name()
-		out = append(out, Info{Version: m.Version, Build: m.Build, Minor: m.Minor, Dir: filepath.Join(paths.PHP, e.Name())})
+		out = append(out, Info{
+			Version: m.Version, Build: m.Build, Minor: m.Minor,
+			ExtPackBuild: m.ExtPackBuild,
+			Dir:          filepath.Join(paths.PHP, e.Name()),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Minor > out[j].Minor })
 	return out, nil

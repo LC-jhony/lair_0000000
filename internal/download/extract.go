@@ -238,7 +238,13 @@ func Install(sources []Source, dest string, expected []string, opts ...Option) e
 	}
 
 	if cfg.AfterExtract != nil {
-		if err := cfg.AfterExtract(staging, archives); err != nil {
+		// The installer's archive paths are not visible here: derive them from
+		// the sources that were actually unpacked into staging.
+		unpacked := make([]string, 0, len(sources))
+		for _, src := range sources {
+			unpacked = append(unpacked, src.Archive)
+		}
+		if err := cfg.AfterExtract(staging, unpacked); err != nil {
 			return fmt.Errorf("merge staged package: %w", err)
 		}
 	}

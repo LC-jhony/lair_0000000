@@ -137,7 +137,8 @@ func UpdateNPM(ctx context.Context, client *http.Client, paths app.Paths, versio
 	}
 	npmBin := filepath.Join(BinDir(versionDir), name)
 	cmd := exec.CommandContext(ctx, npmBin, "install", "-g", "npm@"+target)
-	cmd.Env = append(Env(paths, versionDir, major), os.Environ()...)
+	// Last occurrence wins in exec.Cmd.Env; overrides go last.
+	cmd.Env = append(os.Environ(), Env(paths, versionDir, major)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("npm install -g npm@%s: %w (%s)", target, err, strings.TrimSpace(string(out)))
 	}

@@ -67,7 +67,11 @@ func OfficialArtifact(ctx context.Context, client *http.Client, request, platfor
 	}
 
 	base := strings.TrimRight(OfficialBaseURL, "/") + "/"
-	archive := fmt.Sprintf("node-%s-%s.tar.gz", ver, nodePlatform)
+	ext := "tar.gz"
+	if strings.HasPrefix(platform, "windows-") {
+		ext = "zip" // official Windows releases are zips; SHASUMS256 lists .zip
+	}
+	archive := fmt.Sprintf("node-%s-%s.%s", ver, nodePlatform, ext)
 	sumURL := base + ver + "/SHASUMS256.txt"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, sumURL, nil)
 	if err != nil {

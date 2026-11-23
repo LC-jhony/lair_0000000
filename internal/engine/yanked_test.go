@@ -51,7 +51,7 @@ func phpArchive(t *testing.T) []byte {
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 	for name, body := range map[string]string{
-		"bin/php": "php", "sbin/php-fpm": "fpm",
+		"bin/php": "#!/bin/sh\necho 'PHP 8.4.3 (cli)'\n", "sbin/php-fpm": "#!/bin/sh\necho 'PHP 8.4.3 (fpm)'\n",
 	} {
 		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg})
 		_, _ = tw.Write([]byte(body))

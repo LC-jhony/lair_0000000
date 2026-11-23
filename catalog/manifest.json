@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "channel": "stable",
-  "serial": 1006,
+  "serial": 1007,
   "generated": "2026-11-22T22:10:00Z",
   "expires": "2030-01-01T00:00:00Z",
   "packages": {
@@ -112,6 +112,60 @@
               "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-fpm-linux-x86_64.tar.gz",
               "sha256": "baa5ddcf2f9aabff78848cb6851bb104a4c0873347b8ee65eb9bcf4760a4d31a",
               "size": 12398139,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
+        },
+        "macos-x64": {
+          "build": "N1",
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-cli-macos-x86_64.tar.gz",
+          "sha256": "bd1c20f355e73a9f807b24ba62fd98f3a57bc08d063ebb3aa6393909e01ce89e",
+          "size": 14862400,
+          "published": "2026-11-23T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-fpm-macos-x86_64.tar.gz",
+              "sha256": "6d0a0ffd4dae2672037b599dbca3c2288db3f96efb2f29e0102bbdb1be177c5f",
+              "size": 14889885,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-cli-macos-aarch64.tar.gz",
+          "sha256": "bba286e442796dbd420d778a016e2817b31d5036d11b3ba316d19a60de912cdc",
+          "size": 14435029,
+          "published": "2026-11-23T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-fpm-macos-aarch64.tar.gz",
+              "sha256": "038ea93f7ec17d125ddb09c68d099e72d68c5ee4c235048fe5fe2f720de6484f",
+              "size": 14457789,
               "files": [
                 {
                   "from": "php-fpm",

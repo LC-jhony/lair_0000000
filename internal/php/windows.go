@@ -34,15 +34,18 @@ func MergeExtensionPack(staging string) error {
 		return err
 	}
 
-	// Move shared libraries next to the executables. The pack may put them at
-	// the archive root, in lib/, or in bin/.
+	// Move shared libraries and the executables next to each other. The
+	// official zip keeps php.exe/php-cgi.exe at the archive root; the layout
+	// expected by the rest of Lair puts them under bin/.
 	for _, dir := range []string{staging, filepath.Join(staging, "lib")} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
 		for _, entry := range entries {
-			if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".dll") {
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			isExe := ext == ".exe"
+			if entry.IsDir() || !isExe && ext != ".dll" {
 				continue
 			}
 			src := filepath.Join(dir, entry.Name())

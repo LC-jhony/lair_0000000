@@ -39,10 +39,11 @@ func localSource(from string) (download.Source, error) {
 	return download.Source{Archive: abs}, nil
 }
 
-// stagedLocal extracts a local source into a temporary directory and returns
-// that directory. The caller removes it after probing the version.
-func stagedLocal(src download.Source, expected []string) (string, error) {
-	parent, err := os.MkdirTemp("", "lair-from-")
+// stagedLocal extracts a local source into a temporary directory under the
+// data root (not /tmp, which may be mounted noexec) and returns that directory.
+// The caller removes it after probing the version.
+func stagedLocal(parentRoot string, src download.Source, expected []string) (string, error) {
+	parent, err := os.MkdirTemp(parentRoot, "lair-from-")
 	if err != nil {
 		return "", err
 	}
@@ -60,7 +61,7 @@ func (e *Engine) InstallPHPFrom(ctx context.Context, minor, from string) (*insta
 	if err != nil {
 		return nil, err
 	}
-	staging, err := stagedLocal(src, phpExpected())
+	staging, err := stagedLocal(e.Paths.Root, src, phpExpected())
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func (e *Engine) InstallNodeFrom(ctx context.Context, from string) (*installer.J
 	if err != nil {
 		return nil, err
 	}
-	staging, err := stagedLocal(src, node.Expected())
+	staging, err := stagedLocal(e.Paths.Root, src, node.Expected())
 	if err != nil {
 		return nil, err
 	}

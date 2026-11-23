@@ -257,10 +257,13 @@ func (c *Catalog) Refresh(ctx context.Context) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(mp), 0o755); err != nil {
 		return false, err
 	}
-	if err := os.WriteFile(mp, data, 0o644); err != nil {
+	// Never leave a half-written manifest/signature pair on disk: a concurrent
+	// CLI or daemon would load it and see an empty catalog until the next
+	// refresh. Each file is written to a temp file and renamed into place.
+	if err := writeAtomic(mp, data); err != nil {
 		return false, err
 	}
-	if err := os.WriteFile(sp, sig, 0o644); err != nil {
+	if err := writeAtomic(sp, sig); err != nil {
 		return false, err
 	}
 	if err := c.serials.Accept(c.cfg.Channel, m.Serial); err != nil {
@@ -279,6 +282,30 @@ func (c *Catalog) Refresh(ctx context.Context) (bool, error) {
 		fn(m)
 	}
 	return true, nil
+}
+
+// writeAtomic replaces path with data using a temp file in the same directory
+// and os.Rename. A crash before the rename leaves the previous file intact.
+func writeAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".manifest-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }
 
 // Stale reports whether the current manifest is older than MaxAge.

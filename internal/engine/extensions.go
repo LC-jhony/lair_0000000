@@ -59,7 +59,8 @@ func (e *Engine) ExtAdd(ctx context.Context, projectDir, ext string) (string, er
 	args := append(append([]string{}, inv.Args...), "require", "ext-"+ext+":*")
 	cmd := exec.CommandContext(ctx, inv.Path, args...)
 	cmd.Dir = projectDir
-	cmd.Env = append(append([]string{}, inv.Env...), os.Environ()...)
+	// Isolated PHP/composer environment must win over inherited variables.
+	cmd.Env = append(os.Environ(), inv.Env...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -72,9 +73,33 @@ func (e *Engine) nodeVersionDir(projectDir string) (string, string, error) {
 		return "", "", err
 	}
 	installed := e.installedNode()
-	ver, err := node.ResolveVersion(projectDir, e.IsolatedVersion("node", projectDir), c.Defaults["node"], installed)
-	if err != nil {
-		return "", "", err
+	var ver string
+	if strings.TrimSpace(projectDir) == "" {
+		// The desktop "Update npm" action has no project context. Never let
+		// node.ResolveVersion read .nvmrc from the daemon's working directory.
+		ver = c.Defaults["node"]
+		want, wantErr := version.Parse(strings.TrimPrefix(ver, "v"))
+		found := ""
+		for _, v := range installed {
+			if v == ver || strings.TrimPrefix(v, "v") == strings.TrimPrefix(ver, "v") {
+				found = v
+				break
+			}
+			parsed, perr := version.Parse(strings.TrimPrefix(v, "v"))
+			if wantErr == nil && perr == nil && parsed.Compare(want) == 0 {
+				found = v
+				break
+			}
+		}
+		if found == "" {
+			return "", "", fmt.Errorf("default Node %q is not installed", ver)
+		}
+		ver = found
+	} else {
+		ver, err = node.ResolveVersion(projectDir, e.IsolatedVersion("node", projectDir), c.Defaults["node"], installed)
+		if err != nil {
+			return "", "", err
+		}
 	}
 	major, err := node.MajorOf(ver)
 	if err != nil {
