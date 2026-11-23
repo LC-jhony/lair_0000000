@@ -14,6 +14,7 @@ glow internal/cli/tui_help.md
 | --- | --- |
 | `tab` / `→` / `l` | Siguiente sección |
 | `←` / `h` | Sección anterior |
+| `1`–`9` | Ir directamente a la sección numerada del panel izquierdo |
 | `↑` / `k` | Servicio anterior |
 | `↓` / `j` | Servicio siguiente |
 | `enter` / `space` | Activar o desactivar el servicio seleccionado |
@@ -164,6 +165,7 @@ Uso:
 Teclas:
   tab/→/l       cambiar de sección
   ←/h           sección anterior
+  1–9           ir a la sección numerada
   ↑/k · ↓/j     seleccionar servicio; desplazar ayuda/registros
   rueda ratón   desplazar el panel derecho
   enter/space   activar o desactivar el servicio seleccionado

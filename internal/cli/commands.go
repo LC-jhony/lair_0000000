@@ -40,23 +40,20 @@ func (c *ctx) install(args []string) error {
 	for _, warning := range result.Warnings {
 		c.eprintf("lair: advertencia: %s\n", warning)
 	}
-	// MariaDB is the default database of a fresh Lair installation. A missing
-	// catalog or network must not undo the local setup, so failures are warnings.
-	var db struct {
-		ID               string `json:"id"`
-		AlreadyInstalled bool   `json:"already_installed"`
-	}
-	if err := c.call(daemon.ActionEnsureDatabase, nil, &db); err != nil {
-		c.eprintf("lair: advertencia: no se pudo instalar MariaDB: %v (instálala después con 'lair services install mariadb')\n", err)
-	} else if db.AlreadyInstalled {
-		c.printf("Base de datos: ya hay una instalada.\n")
+	// First run installs the default toolchain: newest stable PHP, newest
+	// Node LTS, the sqlite3 CLI and Composer (already handled by Bootstrap).
+	// Every downloadable component is a normal job with real progress.
+	var firstRun daemon.FirstRunResult
+	if err := c.call(daemon.ActionFirstRun, nil, &firstRun); err != nil {
+		c.eprintf("lair: advertencia: no se pudo preparar la instalación inicial: %v\n", err)
+	} else if len(firstRun.Jobs) == 0 {
+		c.printf("Entorno inicial: PHP, Node y SQLite ya estaban instalados.\n")
 	} else {
-		c.printf("Base de datos: instalando %s (por defecto).\n", engine.DefaultDatabaseID)
-		// An install started in the offline dispatcher lives in this process: if
-		// we returned now the CLI would exit and kill the download. With a daemon
-		// the job survives anyway, but waiting gives honest progress in both.
-		if err := c.waitJob(db.ID); err != nil {
-			c.eprintf("lair: advertencia: falló la instalación de MariaDB: %v (reintenta con 'lair services install mariadb')\n", err)
+		c.printf("Instalando el entorno inicial (%d componentes)…\n", len(firstRun.Jobs))
+		for _, job := range firstRun.Jobs {
+			if err := c.waitJob(job.ID); err != nil {
+				c.eprintf("lair: advertencia: falló %s: %v (reintenta con 'lair php install' / 'lair node install' / 'lair services install sqlite3')\n", job.ID, err)
+			}
 		}
 	}
 	c.printf("Abre una terminal nueva (o ejecuta `source ~/.bashrc` / `source ~/.zshrc`) para actualizar PATH.\n")
@@ -66,16 +63,34 @@ func (c *ctx) install(args []string) error {
 	if c.engine != nil {
 		domain = c.engine.WebSettings().Domain
 	}
+	// The Windows hosts plan needs the names of the parked sites. Status is a
+	// pure snapshot, so reading it here has no side effects.
+	hosts := []string{}
+	var status engine.Status
+	if err := c.call(daemon.ActionStatus, nil, &status); err == nil {
+		for _, site := range status.Sites {
+			if site.Name == "" {
+				continue
+			}
+			hosts = append(hosts, site.Name, "www."+site.Name)
+			hosts = append(hosts, site.Domains...)
+		}
+	}
 	cfg := platform.UnitConfig{
 		User: currentUser(), Home: req.Home, DataDir: c.paths.Root,
 		ExecPath: exe, Domain: domain, DNSAddress: platform.LegacyDNSAddress,
-		DNSBinary: exe,
+		DNSBinary: exe, Hosts: hosts,
+		CAPath: filepath.Join(c.paths.Certs, "ca.pem"),
 	}
 	plan, err := platform.BuildPlan(cfg)
 	if err != nil {
 		return fmt.Errorf("privileged plan: %w", err)
 	}
-	setup := filepath.Join(c.paths.Root, "setup-privileged.sh")
+	setupName := "setup-privileged.sh"
+	if platform.Current() == platform.KindWindows {
+		setupName = "setup-privileged.ps1"
+	}
+	setup := filepath.Join(c.paths.Root, setupName)
 	if err := os.WriteFile(setup, []byte(plan.Script()), 0o700); err != nil {
 		return err
 	}
@@ -89,9 +104,16 @@ func (c *ctx) install(args []string) error {
 		return err
 	}
 	c.printf("One-time privileged setup (elevation is requested once, before anything is replaced):\n")
-	c.printf("  sudo %s\n  sudo %s --add\n", setup, trustSystem)
-	c.printf("  %s --add        # browser NSS trust, runs as your user\n", trustUser)
-	c.printf("  sudo systemctl enable --now lair@%s\n\n", currentUser())
+	switch platform.Current() {
+	case platform.KindWindows:
+		c.printf("  powershell -NoProfile -ExecutionPolicy Bypass -File %s   # desde PowerShell elevado\n\n", setup)
+	case platform.KindDarwin:
+		c.printf("  sudo %s          # /etc/resolver/<domain> + CA del sistema\n\n", setup)
+	default:
+		c.printf("  sudo %s\n  sudo %s --add\n", setup, trustSystem)
+		c.printf("  %s --add        # browser NSS trust, runs as your user\n", trustUser)
+		c.printf("  sudo systemctl enable --now lair@%s\n\n", currentUser())
+	}
 	c.printf("Review these scripts before running them. Then open a new shell to pick up PATH.\n")
 	return nil
 }
@@ -338,6 +360,31 @@ func (c *ctx) update() error {
 // A variable so tests can shorten the wait without sleeping for minutes.
 var jobWaitTimeout = 30 * time.Minute
 
+// showProgress renders a compact progress bar in interactive terminals only,
+// so captured/test output stays stable.
+func (c *ctx) showProgress(st installer.Status) {
+	if !isTerminal(os.Stdout) {
+		return
+	}
+	pct := 0
+	if st.Total > 0 {
+		pct = int(100 * st.Downloaded / st.Total)
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	const width = 24
+	filled := pct * width / 100
+	fmt.Fprintf(c.out, "\r%-26s [%s%s] %3d%%", st.ID,
+		strings.Repeat("=", filled), strings.Repeat(" ", width-filled), pct)
+}
+
+func (c *ctx) clearProgress() {
+	if isTerminal(os.Stdout) {
+		fmt.Fprint(c.out, "\r")
+	}
+}
+
 // waitJob polls a job until completion and surfaces its error.
 func (c *ctx) waitJob(id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), jobWaitTimeout)
@@ -349,7 +396,9 @@ func (c *ctx) waitJob(id string) error {
 		if err := c.callContext(ctx, daemon.ActionJob, daemon.JobRequest{ID: id}, &st); err != nil {
 			return err
 		}
+		c.showProgress(st)
 		if st.Done {
+			c.clearProgress()
 			if st.Error != "" {
 				return fmt.Errorf("%s", st.Error)
 			}
@@ -668,7 +717,7 @@ func (c *ctx) services(args []string) error {
 		return nil
 	case "default":
 		if a.id == "" {
-			return fmt.Errorf("usage: lair services default mariadb|mysql|postgres")
+			return fmt.Errorf("usage: lair services default sqlite|mariadb|mysql|postgres")
 		}
 		if err := c.call(daemon.ActionDBDefault, daemon.DBDefaultRequest{ID: a.id}, nil); err != nil {
 			return err
@@ -782,10 +831,10 @@ func (c *ctx) secure(args []string) error {
 
 func (c *ctx) pin(args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("usage: lair pin php|node <version>")
+		return fmt.Errorf("usage: lair pin php|node|root <value>")
 	}
-	if args[0] != "php" && args[0] != "node" {
-		return fmt.Errorf("pin accepts only php or node")
+	if args[0] != "php" && args[0] != "node" && args[0] != "root" {
+		return fmt.Errorf("pin accepts only php, node or root")
 	}
 	dir, _ := os.Getwd()
 	req := daemon.PinRequest{Tool: args[0], Value: args[1], Dir: dir}

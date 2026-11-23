@@ -84,8 +84,11 @@ func (j *Job) set(fn func(*Status)) {
 }
 
 func (j *Job) log(line string) {
-	if j.logFile != nil {
-		fmt.Fprintln(j.logFile, line)
+	j.mu.Lock()
+	file := j.logFile
+	j.mu.Unlock()
+	if file != nil {
+		fmt.Fprintln(file, line)
 	}
 }
 
@@ -108,6 +111,9 @@ type Manager struct {
 
 	mu      sync.Mutex
 	running map[string]*Job
+	// onDone runs after every successful job. The engine uses it to refresh
+	// shims/PATH so a newly installed tool is immediately reachable.
+	onDone func()
 	// lastReq keeps the request of a failed job so `job-retry` can start it
 	// again without the caller having to rebuild the manifest artifact.
 	lastReq map[string]Request
@@ -321,6 +327,7 @@ func (m *Manager) run(ctx context.Context, req Request, job *Job, cancel context
 	}
 	job.log("installed")
 	job.set(func(s *Status) { s.Done = true; s.Phase = "installing"; s.Downloaded = s.Total })
+	m.jobDone()
 	m.finish(req.ID, job, nil, true)
 }
 
@@ -400,6 +407,7 @@ func (m *Manager) Run(parent context.Context, req RunRequest) (*Job, error) {
 		}
 		job.log("installed")
 		job.set(func(s *Status) { s.Done = true; s.Downloaded = s.Total })
+		m.jobDone()
 		m.finish(req.ID, job, nil, true)
 	}()
 	return job, nil
@@ -455,15 +463,28 @@ func (m *Manager) JobStatus(id string) (Status, bool) {
 	return s, ok
 }
 
+// SetOnDone installs a hook called after every successful job.
+func (m *Manager) SetOnDone(fn func()) { m.onDone = fn }
+
+func (m *Manager) jobDone() {
+	if m.onDone != nil {
+		m.onDone()
+	}
+}
+
 // Retry restarts a failed install with the exact same request. The caller
 // should check Status.Retryable first: verification failures need a corrected
 // artifact rather than another download of the same bytes.
 func (m *Manager) Retry(parent context.Context, id string) (*Job, error) {
 	m.mu.Lock()
 	req, ok := m.lastReq[id]
+	st, hasStatus := m.recent[id]
 	m.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("no failed install to retry for %s", id)
+	}
+	if hasStatus && !st.Retryable {
+		return nil, fmt.Errorf("failure for %s is not retryable: the artifact itself must be corrected", id)
 	}
 	return m.Start(parent, req)
 }

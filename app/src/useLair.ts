@@ -12,6 +12,8 @@ export interface LairController {
   status: LairStatus | null;
   error: string;
   busy: string;
+  /** Progress of the job currently being awaited, if any. */
+  jobProgress?: JobStatus | null;
   refresh: () => Promise<void>;
   act: (
     label: string,
@@ -67,6 +69,7 @@ export function useLair(
   const [status, setStatus] = useState<LairStatus | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const [jobProgress, setJobProgress] = useState<JobStatus | null>(null);
 
   const aliveRef = useRef(true);
   const busyRef = useRef(false);
@@ -159,6 +162,7 @@ export function useLair(
     controllerRef.current = null;
     busyRef.current = false;
     if (aliveRef.current) setBusy('');
+    setJobProgress(null);
   }, []);
 
   const act = useCallback(
@@ -180,6 +184,7 @@ export function useLair(
         // exist so `node -v`/`npm -v` work no matter which UI started it.
         const job = result as JobStatus | undefined;
         if (job && typeof job === 'object' && job.id) {
+          setJobProgress(job);
           let failed = Boolean(job.error);
           let canceled = Boolean(job.canceled);
           if (!job.done && !failed && !canceled) {
@@ -192,6 +197,7 @@ export function useLair(
               }
               try {
                 const current = await client.job(job.id as string, controller.signal);
+                setJobProgress(current);
                 if (current.error || current.canceled) {
                   failed = Boolean(current.error);
                   canceled = Boolean(current.canceled);
@@ -229,6 +235,7 @@ export function useLair(
           busyRef.current = false;
           if (aliveRef.current) setBusy('');
         }
+        setJobProgress(null);
       }
     },
     [client, refresh],
@@ -236,5 +243,5 @@ export function useLair(
 
   const clearError = useCallback(() => setError(''), []);
 
-  return { client, status, error, busy, refresh, act, cancel, clearError };
+  return { client, status, error, busy, jobProgress, refresh, act, cancel, clearError };
 }

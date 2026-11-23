@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/lair-sh/lair/internal/engine"
 	"github.com/lair-sh/lair/internal/installer"
@@ -19,6 +20,7 @@ type Caller interface {
 // Dispatcher dispatches actions directly to an engine. It is the in-process
 // counterpart of the unix-socket API, used by the CLI when no daemon runs.
 type Dispatcher struct {
+	mu       sync.RWMutex
 	handlers map[string]Action
 }
 
@@ -111,7 +113,8 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 		if err := decode(raw, &req); err != nil {
 			return nil, err
 		}
-		job, err := e.Installer.Retry(ctx, req.ID)
+		// Like other job actions, a retry must outlive the HTTP request.
+		job, err := e.Installer.Retry(jobContext(ctx), req.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -424,6 +427,18 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 		}
 		return BootstrapResult{BinDir: e.Paths.Bin, ComposerPath: phar, Warnings: warnings}, nil
 	})
+	add(ActionFirstRun, func(ctx context.Context, _ json.RawMessage) (any, error) {
+		// Jobs must outlive the HTTP request that started them.
+		jobs, err := e.FirstRun(jobContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		result := FirstRunResult{Jobs: make([]installer.Status, 0, len(jobs))}
+		for _, job := range jobs {
+			result.Jobs = append(result.Jobs, job.Status())
+		}
+		return result, nil
+	})
 	add(ActionEnsureShims, func(_ context.Context, raw json.RawMessage) (any, error) {
 		var req EnsureShimsRequest
 		if err := decode(raw, &req); err != nil {
@@ -463,11 +478,21 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 
 // Set overrides a handler. The runtime uses it to provide actions that need
 // access to long-lived components (e.g. restarting all supervisors).
-func (d *Dispatcher) Set(name string, fn Action) { d.handlers[name] = fn }
+func (d *Dispatcher) Set(name string, fn Action) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.handlers[name] = fn
+}
 
 // Register installs every action on a Server.
 func Register(srv *Server, d *Dispatcher) {
+	d.mu.RLock()
+	handlers := make(map[string]Action, len(d.handlers))
 	for name, fn := range d.handlers {
+		handlers[name] = fn
+	}
+	d.mu.RUnlock()
+	for name, fn := range handlers {
 		srv.Handle(name, fn)
 	}
 }
@@ -482,7 +507,9 @@ func (d *Dispatcher) Call(ctx context.Context, action string, payload, out any) 
 		}
 		raw = b
 	}
+	d.mu.RLock()
 	fn, ok := d.handlers[action]
+	d.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("unknown action: %s", action)
 	}

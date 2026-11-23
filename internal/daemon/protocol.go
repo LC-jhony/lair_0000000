@@ -6,6 +6,7 @@ package daemon
 
 import (
 	"github.com/lair-sh/lair/internal/engine"
+	"github.com/lair-sh/lair/internal/installer"
 	"github.com/lair-sh/lair/internal/project"
 )
 
@@ -51,6 +52,7 @@ const (
 	ActionIsolate          = "isolate"
 	ActionUpdate           = "update"
 	ActionBootstrap        = "bootstrap"
+	ActionFirstRun         = "first-run"
 	ActionEnsureShims      = "ensure-shims"
 	ActionUninstall        = "uninstall"
 	ActionRestart          = "restart"
@@ -262,6 +264,12 @@ type BootstrapResult struct {
 	BinDir       string   `json:"bin_dir"`
 	ComposerPath string   `json:"composer_path"`
 	Warnings     []string `json:"warnings,omitempty"`
+}
+
+// FirstRunResult lists the jobs started by the fresh-install setup. Callers
+// poll them to render a single progress bar for the whole operation.
+type FirstRunResult struct {
+	Jobs []installer.Status `json:"jobs"`
 }
 
 // UninstallRequest controls how Lair removes its local state.

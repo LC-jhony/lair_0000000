@@ -185,6 +185,33 @@ const (
 	paneDebugger
 )
 
+// paneIndex and paneAt are the only source of truth for navigation order.
+// paneID is just an identifier: its numeric value must never be used for
+// next/previous or sidebar highlighting (the enum and paneOrder differ).
+func paneIndex(id paneID) int {
+	for i, candidate := range paneOrder {
+		if candidate == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func paneAt(index int) paneID {
+	if len(paneOrder) == 0 {
+		return paneOverview
+	}
+	wrapped := ((index % len(paneOrder)) + len(paneOrder)) % len(paneOrder)
+	return paneOrder[wrapped]
+}
+
+func paneNumber(id paneID) int {
+	if i := paneIndex(id); i >= 0 {
+		return i + 1
+	}
+	return 0
+}
+
 type paneInfo struct {
 	icon     string
 	title    string
@@ -264,6 +291,7 @@ type pollMsg struct {
 	id        string
 	attempt   int
 	transport int
+	progress  *installer.Status
 }
 
 type serviceMsg struct {
@@ -386,6 +414,7 @@ type tuiModel struct {
 	loaded            bool
 	busy              string
 	message           string
+	jobProgress       *installer.Status
 
 	form            *huh.Form
 	confirmValue    bool
@@ -761,7 +790,8 @@ func (m *tuiModel) pollJob(label, id string, attempt, transport int) tea.Cmd {
 			m.ensureShimsSilently()
 			return actionMsg{label: label}
 		}
-		return pollMsg{label: label, id: id, attempt: attempt + 1, transport: transport}
+		progress := st
+		return pollMsg{label: label, id: id, attempt: attempt + 1, transport: transport, progress: &progress}
 	})
 }
 
@@ -860,6 +890,27 @@ func (m *tuiModel) busyNotice() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// goToPane changes the active pane through paneOrder, resets the scroll and
+// reloads only when the pane actually changed.
+func (m *tuiModel) goToPane(next paneID) tea.Cmd {
+	if next == m.pane {
+		return nil
+	}
+	m.pane = next
+	m.viewport.GotoTop()
+	m.message = ""
+	m.logger.Debug("pane changed", "pane", paneNumber(next))
+	return m.paneLoadCmd()
+}
+
+// goToPaneNumber implements the 1-9 shortcuts shown in the sidebar.
+func (m *tuiModel) goToPaneNumber(n int) tea.Cmd {
+	if n < 1 || n > len(paneOrder) {
+		return nil
+	}
+	return m.goToPane(paneAt(n - 1))
+}
+
 func (m *tuiModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -883,6 +934,12 @@ func (m *tuiModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = styleSubtle.Render("registro cerrado")
 			return m, nil
 		}
+		// 1-9 jump directly to the pane shown in the sidebar (not while a
+		// log/detail overlay is open).
+		if k := msg.String(); m.logText == "" && m.detailText == "" && len(k) == 1 && k[0] >= '1' && k[0] <= '9' {
+			return m, m.goToPaneNumber(int(k[0] - '0'))
+		}
+
 		// Reentrancy guard: never launch a second action while one is running.
 		if m.busy != "" && m.isActionKey(msg) {
 			return m.busyNotice()
@@ -894,13 +951,9 @@ func (m *tuiModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.closeLog()
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Next):
-			m.pane = paneID((int(m.pane) + 1) % len(paneOrder))
-			m.viewport.GotoTop()
-			return m, m.paneLoadCmd()
+			return m, m.goToPane(paneAt(paneIndex(m.pane) + 1))
 		case key.Matches(msg, m.keys.Prev):
-			m.pane = paneID((int(m.pane) + len(paneOrder) - 1) % len(paneOrder))
-			m.viewport.GotoTop()
-			return m, m.paneLoadCmd()
+			return m, m.goToPane(paneAt(paneIndex(m.pane) - 1))
 		case key.Matches(msg, m.keys.Help):
 			m.showHelp = true
 			m.viewport.GotoTop()
@@ -1083,6 +1136,7 @@ func (m *tuiModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case jobMsg:
 		return m, m.pollJob(msg.label, msg.id, 0, 0)
 	case pollMsg:
+		m.jobProgress = msg.progress
 		return m, m.pollJob(msg.label, msg.id, msg.attempt, msg.transport)
 
 	case logNamesMsg:
@@ -1259,6 +1313,7 @@ func (m *tuiModel) updateMain(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionMsg:
 		m.busy = ""
+		m.jobProgress = nil
 		if msg.err != nil {
 			m.message = styleErr.Render(stripControl(msg.label) + ": " + stripControl(msg.err.Error()))
 			m.logger.Error("action failed", "action", msg.label, "err", msg.err)
@@ -1441,11 +1496,11 @@ func (m *tuiModel) renderSidebar() string {
 	}
 	for i, id := range paneOrder {
 		info := paneInfos[id]
-		label := "  " + info.icon + "  " + info.title
-		if i == int(m.pane) {
-			lines = append(lines, styleNavOn.Render("▸ "+info.icon+"  "+info.title))
+		number := fmt.Sprintf("%d", i+1)
+		if id == m.pane {
+			lines = append(lines, styleNavOn.Render("▸ "+number+" "+info.icon+" "+info.title))
 		} else {
-			lines = append(lines, styleNav.Render(label))
+			lines = append(lines, styleNav.Render("  "+number+" "+info.icon+" "+info.title))
 		}
 	}
 	running, total := m.serviceCounts()
@@ -1862,6 +1917,19 @@ func (m *tuiModel) renderFooter() string {
 	}
 	var b strings.Builder
 	b.WriteString(styleSubtle.Render(strings.Repeat("─", m.width)) + "\n")
+	if p := m.jobProgress; p != nil && p.Total > 0 {
+		pct := int(100 * p.Downloaded / p.Total)
+		if pct < 0 {
+			pct = 0
+		}
+		if pct > 100 {
+			pct = 100
+		}
+		width := 24
+		filled := pct * width / 100
+		status = fmt.Sprintf("%s %s %3d%%", styleBarOn.Render(strings.Repeat("█", filled)),
+			styleBarOff.Render(strings.Repeat("░", width-filled)), pct)
+	}
 	b.WriteString(status + "\n")
 	b.WriteString(m.help.View(m.keys) + "\n")
 	return b.String()

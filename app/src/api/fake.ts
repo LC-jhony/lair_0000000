@@ -335,6 +335,18 @@ export class FakeDaemon implements DaemonClient {
     return 'El catálogo firmado ya está actualizado.';
   }
 
+  async firstRun() {
+    return { jobs: [] };
+  }
+
+  async uninstall(_deleteData = false) {
+    this.statusData.php = [];
+    this.statusData.node = [];
+    this.statusData.composer = undefined;
+    this.statusData.services = {};
+    this.statusData.sites = [];
+  }
+
   async logsList() {
     return Object.keys(this.logsData).sort();
   }

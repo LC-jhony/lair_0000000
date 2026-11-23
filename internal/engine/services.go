@@ -171,6 +171,14 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 			}
 		}
 	}
+	for _, aux := range services.AuxPorts(id, port) {
+		if aux <= 0 || aux > 65535 {
+			return nil, fmt.Errorf("port %d makes %s auxiliary port %d invalid; choose another --port", port, id, aux)
+		}
+		if conflict := services.CheckPort(aux); conflict != nil {
+			return nil, fmt.Errorf("%s needs auxiliary port %d: %s", id, aux, conflict.String())
+		}
+	}
 	if conflict := services.CheckPort(port); conflict != nil {
 		// Installing a newer version of a service that is already running on
 		// its own port must work (that is what `services update` does). Stop
@@ -210,6 +218,9 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 // job after the binary is in place.
 func (e *Engine) initService(ctx context.Context, id, ver, build string, port int) error {
 	data := services.DataPath(e.Paths, id, ver)
+	// Decide BEFORE EnsureDataDir writes my.cnf: an empty datadir must be
+	// initialised even though the config file now makes it non-empty.
+	needInit := services.InitNeeded(id, data)
 	if err := services.EnsureDataDir(e.Paths, id, data); err != nil {
 		return fmt.Errorf("prepare data dir: %w", err)
 	}
@@ -219,7 +230,7 @@ func (e *Engine) initService(ctx context.Context, id, ver, build string, port in
 			return err
 		}
 	}
-	if services.InitNeeded(id, data) {
+	if needInit {
 		argv, workDir, err := services.InitCommand(e.Paths, id, ver, build)
 		if err != nil {
 			return err
@@ -247,15 +258,28 @@ func (e *Engine) initService(ctx context.Context, id, ver, build string, port in
 	})
 }
 
-// UseService changes the active version of an installed service.
+// UseService changes the active version of an installed service. If the
+// service is being supervised, it is restarted with the new spec so the old
+// binary/data directory is not left running under the new default.
 func (e *Engine) UseService(id, ver string) error {
 	installed := e.installedServiceVersions(id)
 	for _, v := range installed {
 		if v == ver {
-			return e.Config.Update(func(c *config.Config) error {
+			_, supervised := e.Supervisors.State(id)
+			if err := e.Config.Update(func(c *config.Config) error {
 				c.Defaults[id] = ver
 				return nil
-			})
+			}); err != nil {
+				return err
+			}
+			if supervised {
+				spec, err := e.ServiceSpec(id)
+				if err != nil {
+					return err
+				}
+				return e.Supervisors.Restart(id, spec)
+			}
+			return nil
 		}
 	}
 	return fmt.Errorf("%s %s is not installed", id, ver)
@@ -338,6 +362,7 @@ func (e *Engine) UninstallService(id, ver string, deleteData bool) error {
 			}
 		}
 	}
+	_, supervised := e.Supervisors.State(id)
 	if build != "" {
 		if err := os.RemoveAll(services.InstallDir(e.Paths, id, ver, build)); err != nil {
 			return err
@@ -348,7 +373,7 @@ func (e *Engine) UninstallService(id, ver string, deleteData bool) error {
 			return err
 		}
 	}
-	return e.Config.Update(func(c *config.Config) error {
+	if err := e.Config.Update(func(c *config.Config) error {
 		delete(c.Installed, id+"/"+ver)
 		if c.Defaults[id] == ver {
 			c.Defaults[id] = ""
@@ -358,7 +383,23 @@ func (e *Engine) UninstallService(id, ver string, deleteData bool) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	// Never leave a supervised process running from a directory we just
+	// deleted: restart it on the remaining version, or stop it entirely.
+	if supervised {
+		active, err := e.Config.View()
+		if err != nil || active.Defaults[id] == "" {
+			return e.Supervisors.Stop(id)
+		}
+		spec, err := e.ServiceSpec(id)
+		if err != nil {
+			return err
+		}
+		return e.Supervisors.Restart(id, spec)
+	}
+	return nil
 }
 
 // CreateDatabase runs the service's create-db command with a default timeout.
@@ -383,12 +424,13 @@ func (e *Engine) CreateDatabaseContext(ctx context.Context, id, name string) (st
 }
 
 // DefaultDatabaseID is the database installed when Lair is set up for the first
-// time. MariaDB is the default because it is the usual Laravel companion.
-const DefaultDatabaseID = "mariadb"
+// time. SQLite is the default: it needs no service, no port and no credentials,
+// and its CLI is installed from the signed catalog.
+const DefaultDatabaseID = "sqlite"
 
 func isDatabaseService(id string) bool {
 	switch id {
-	case "mariadb", "mysql", "postgres":
+	case "sqlite", "mariadb", "mysql", "postgres":
 		return true
 	}
 	return false
@@ -409,7 +451,11 @@ func (e *Engine) SetDefaultDatabase(id string) error {
 	if !isDatabaseService(id) {
 		return fmt.Errorf("%q is not a database service", id)
 	}
-	if len(e.installedServiceVersions(id)) == 0 {
+	if id == "sqlite" {
+		if e.installedToolVersion(SQLiteToolID) == "" && len(e.installedToolVersions(SQLiteToolID)) == 0 {
+			return fmt.Errorf("sqlite3 CLI is not installed")
+		}
+	} else if len(e.installedServiceVersions(id)) == 0 {
 		return fmt.Errorf("%s is not installed", id)
 	}
 	return e.Config.Update(func(c *config.Config) error {
@@ -419,10 +465,14 @@ func (e *Engine) SetDefaultDatabase(id string) error {
 }
 
 // EnsureDefaultDatabase installs the default database when none is installed
-// yet. It is deliberately idempotent: repeated `lair install` runs never
-// re-download MariaDB. The returned job may be nil when nothing was needed.
+// yet. SQLite is just the catalog CLI plus a per-project database file, so it
+// is handled here as a tool job. Other databases are supervised services.
+// The function is idempotent and may return a nil job when nothing is needed.
 func (e *Engine) EnsureDefaultDatabase(ctx context.Context) (*installer.Job, error) {
 	id := e.DefaultDatabase()
+	// Respect an existing database service: upgrading an installation must
+	// never silently switch its projects to SQLite. The configured preference
+	// wins; the fixed order is only a fallback.
 	for _, candidate := range []string{id, "mariadb", "mysql", "postgres"} {
 		if len(e.installedServiceVersions(candidate)) > 0 {
 			if candidate != id {
@@ -433,6 +483,18 @@ func (e *Engine) EnsureDefaultDatabase(ctx context.Context) (*installer.Job, err
 			}
 			return nil, nil
 		}
+	}
+	if id == "sqlite" {
+		if e.installedToolVersion(SQLiteToolID) == "" && len(e.installedToolVersions(SQLiteToolID)) == 0 {
+			if err := e.Config.Update(func(c *config.Config) error {
+				c.Defaults["database"] = "sqlite"
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+			return e.InstallTool(ctx, SQLiteToolID, "")
+		}
+		return nil, nil
 	}
 	if err := e.Config.Update(func(c *config.Config) error {
 		c.Defaults["database"] = id

@@ -103,6 +103,8 @@ export const ACTIONS = {
   ensureShims: 'ensure-shims',
   restart: 'restart',
   updateCatalog: 'update',
+  uninstall: 'uninstall',
+  firstRun: 'first-run',
 } as const;
 
 /** HTTP client for the daemon's token-protected POST /api bridge. */
@@ -113,12 +115,21 @@ export class HttpDaemonClient implements DaemonClient {
     baseURL: string,
     private readonly token: string,
     private readonly fetchImpl: typeof fetch = globalThis.fetch,
+    private readonly ipcCall?: (action: string, payload: unknown) => Promise<unknown>,
   ) {
-    if (!token) throw new DaemonError('missing daemon token', 401);
+    if (!token && !ipcCall) throw new DaemonError('missing daemon token', 401);
     this.base = baseURL.replace(/\/+$/, '');
   }
 
   async call<T>(action: string, payload: unknown = {}, signal?: AbortSignal): Promise<T> {
+    if (this.ipcCall) {
+      try {
+        return (await this.ipcCall(action, payload)) as T;
+      } catch (cause) {
+        if (cause instanceof DaemonError) throw cause;
+        throw new DaemonError(cause instanceof Error ? cause.message : 'daemon call failed', 0);
+      }
+    }
     let response: Response;
     // Call fetch detached: native fetch rejects a receiver that is not Window,
     // and calling it as `this.fetchImpl(...)` passes this client as receiver.
@@ -187,16 +198,16 @@ export class HttpDaemonClient implements DaemonClient {
     return this.call<JobStatus>(ACTIONS.installNode, { version });
   }
 
-  uninstallPHP(minor: string) {
-    return this.call(ACTIONS.uninstallPHP, { minor });
+  async uninstallPHP(minor: string) {
+    await this.call(ACTIONS.uninstallPHP, { minor });
   }
 
   updateNode(major: string) {
     return this.call<JobStatus>(ACTIONS.updateNode, { version: major });
   }
 
-  uninstallNode(major: string) {
-    return this.call(ACTIONS.uninstallNode, { version: major });
+  async uninstallNode(major: string) {
+    await this.call(ACTIONS.uninstallNode, { version: major });
   }
 
   updateComposer() {
@@ -388,6 +399,14 @@ export class HttpDaemonClient implements DaemonClient {
     const result = await this.call<{ text?: string }>(ACTIONS.updateCatalog);
     return result.text ?? '';
   }
+
+  async uninstall(deleteData = false) {
+    await this.call(ACTIONS.uninstall, { delete_data: deleteData });
+  }
+
+  firstRun() {
+    return this.call<{ jobs?: JobStatus[] }>(ACTIONS.firstRun);
+  }
 }
 
 /** Reads the connection details published by the daemon to the main process. */
@@ -398,5 +417,12 @@ export async function connectFromDesktop(
   if (!bridge) return null;
   const details = await bridge.connect();
   if (!details) return null;
-  return new HttpDaemonClient(details.url, details.token, fetchImpl);
+  if (typeof bridge.call === 'function') {
+    return new HttpDaemonClient(details.url, '', fetchImpl, (action, payload) =>
+      bridge.call!(action, payload),
+    );
+  }
+  // Browser/dev fallback (no Electron bridge): token is only used here.
+  const legacy = details as { url: string; token?: string };
+  return new HttpDaemonClient(details.url, legacy.token ?? '', fetchImpl);
 }

@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from 'react';
 import { LoaderCircle, RefreshCw } from 'lucide-react';
-import { AppSidebar, Button, PaneErrorBoundary, SettingsError } from './components';
+import { AppSidebar, Button, PaneErrorBoundary, Progress, SettingsError } from './components';
+import { jobProgress } from './api';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from './components/ui/sidebar';
 import { useT } from './i18n';
 import { PANES, PaneContent, type PaneId } from './panes';
@@ -17,6 +18,8 @@ export default function App() {
   const state = useLair();
   const [activePane, setActivePane] = useState<PaneId>('overview');
   const pane = PANES.find((item) => item.id === activePane) ?? PANES[0]!;
+  const progress = state.jobProgress ? jobProgress(state.jobProgress) : null;
+  const progressPercent = progress === null ? 0 : Math.round(progress * 100);
 
   return (
     <SidebarProvider className="h-svh overflow-hidden bg-background">
@@ -48,6 +51,15 @@ export default function App() {
             </Button>
           </div>
         </header>
+        {state.jobProgress && (
+          <div className="relative z-20 shrink-0 px-4 pt-1 md:px-6" aria-live="polite">
+            <Progress
+              value={progressPercent}
+              label={state.busy || 'Instalación'}
+              className={progress === null ? 'h-1 animate-pulse rounded-none' : 'h-1 rounded-none'}
+            />
+          </div>
+        )}
         <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
           <div className="mx-auto w-full max-w-6xl">
             <PaneErrorBoundary key={activePane} onRetry={() => void state.refresh()}>

@@ -829,6 +829,48 @@ func TestViewportContentUpdatedInUpdateAndNarrowLayout(t *testing.T) {
 	}
 }
 
+func TestTUIPaneNavigationFollowsPaneOrder(t *testing.T) {
+	m := testTUIModel(t, &tuiFakeCaller{})
+
+	seen := map[paneID]bool{}
+	for _, id := range paneOrder {
+		if seen[id] {
+			t.Fatalf("pane %d is duplicated in paneOrder", id)
+		}
+		seen[id] = true
+	}
+	for id := range paneInfos {
+		if !seen[id] {
+			t.Fatalf("pane %d has no sidebar entry", id)
+		}
+	}
+
+	for i, id := range paneOrder {
+		if next := paneAt(paneIndex(id) + 1); next != paneOrder[(i+1)%len(paneOrder)] {
+			t.Fatalf("next after pane %d = %d, want %d", id, next, paneOrder[(i+1)%len(paneOrder)])
+		}
+		if prev := paneAt(paneIndex(id) - 1); prev != paneOrder[(i-1+len(paneOrder))%len(paneOrder)] {
+			t.Fatalf("prev before pane %d = %d, want %d", id, prev, paneOrder[(i-1+len(paneOrder))%len(paneOrder)])
+		}
+	}
+
+	// Sitios is followed by Correo, not by Sistema: the enum order is not the
+	// navigation order.
+	if got := paneAt(paneIndex(paneSites) + 1); got != paneMail {
+		t.Fatalf("next after Sitios = %d, want Correo (%d)", got, paneMail)
+	}
+
+	m.pane = paneOverview
+	_ = m.goToPaneNumber(5)
+	if m.pane != paneSites {
+		t.Fatalf("5 jumped to pane %d, want Sitios (%d)", m.pane, paneSites)
+	}
+	m.setSize(100, 30)
+	if sidebar := m.renderSidebar(); !strings.Contains(sidebar, "5") {
+		t.Fatalf("sidebar does not show pane numbers: %q", sidebar)
+	}
+}
+
 // ---------- Tooling panes: Mail, Dumps and Debugger ----------
 
 // runPaneCmd unwraps the spinner batch used by pane actions and returns the

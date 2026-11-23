@@ -459,6 +459,10 @@ export interface DaemonClient {
   ensureShims(signal?: AbortSignal): Promise<void>;
   restart(): Promise<void>;
   updateCatalog(): Promise<string>;
+  /** Removes everything Lair installed; deleteData also removes databases. */
+  uninstall(deleteData?: boolean): Promise<void>;
+  /** Starts the default first-run installs; returns the jobs to poll. */
+  firstRun(): Promise<{ jobs?: JobStatus[] }>;
 }
 
 /** Installed versions can arrive as a string or a JSON array from the daemon. */

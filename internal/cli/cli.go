@@ -222,7 +222,7 @@ Usage:
   lair services update <id> [ver]    Install newest, activate and restart
   lair services uninstall <id> [ver] [--delete-data]
   lair services create-db <id> <name>
-  lair services default mariadb|mysql|postgres   Set the default database
+  lair services default sqlite|mariadb|mysql|postgres  Set the default database
   lair services restart|stop <id>
   lair park                          Park the current directory as <name>.test
   lair link <name> [path]            Park a directory under an explicit host

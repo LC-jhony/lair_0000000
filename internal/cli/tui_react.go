@@ -53,7 +53,14 @@ func reactTUIBundle(paths app.Paths) (string, error) {
 // the versions installed through Lair's nvm integration.
 func reactTUINode() string {
 	if explicit := strings.TrimSpace(os.Getenv("LAIR_NODE")); explicit != "" {
-		return explicit
+		// This path is later passed to exec without a shell. Accept only an
+		// absolute, executable file so a hostile env cannot point at a script
+		// or a directory.
+		if filepath.IsAbs(explicit) {
+			if info, err := os.Stat(explicit); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+				return explicit
+			}
+		}
 	}
 	if found, err := exec.LookPath("node"); err == nil {
 		return found

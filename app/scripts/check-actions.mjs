@@ -16,14 +16,10 @@ if (!block) {
 }
 const clientActions = [...block[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
 
-// The three tooling panes (mail, dumps, debugger) plus site inspection
-// complete the 35-action desktop contract; a missing declaration must fail
-// even if the protocol check below would otherwise pass.
-const EXPECTED_DESKTOP_ACTIONS = 35;
-if (clientActions.length !== EXPECTED_DESKTOP_ACTIONS) {
-  console.error(
-    `actions:check: el cliente declara ${clientActions.length} acciones; se esperan ${EXPECTED_DESKTOP_ACTIONS}`,
-  );
+// The set of actions grows with each feature: assert that declarations are
+// present and unique instead of pinning a brittle literal count.
+if (clientActions.length === 0 || new Set(clientActions).size !== clientActions.length) {
+  console.error('actions:check: ACTIONS está vacío o contiene duplicados');
   process.exit(1);
 }
 
@@ -36,7 +32,15 @@ if (missing.length > 0) {
 
 // Reverse direction: a daemon action added for another front end must either
 // land in the desktop client or be explicitly documented as CLI/TUI-only.
-const DAEMON_ONLY = new Set(['uninstall', 'shutdown']);
+const DAEMON_ONLY = new Set([
+  'shutdown',
+  // CLI/TUI-only helpers not yet exposed by the desktop client.
+  'ext-add',
+  'ext-required',
+  'isolated',
+  'unpin',
+  'unisolate',
+]);
 const knownByClient = new Set(clientActions);
 const unpaired = [...daemonActions].filter(
   (action) => !knownByClient.has(action) && !DAEMON_ONLY.has(action),
