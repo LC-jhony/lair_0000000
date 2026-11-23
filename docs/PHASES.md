@@ -1,5 +1,7 @@
 # Notas por fases
 
+> **Estado: fases 1–6 implementadas y testeadas.** Este documento es un registro histórico de decisiones por fase; no describe trabajo pendiente. Para el detalle publicado de cada entrega, consulta la sección «Novedades por fases» de [`RELEASE_NOTES.md`](../RELEASE_NOTES.md). Las decisiones de arquitectura vigentes están en [`adr/`](adr/).
+
 ## Fase 1 — Catálogo y descarga verificada
 
 - `internal/manifest`: manifiesto `schema/channel/serial/generated/expires/packages`, `.sig` base64, clave pública embebida, rechazo de firma inválida, canal distinto, esquema desconocido, expirado y serial menor por canal.
@@ -34,9 +36,28 @@ Tests: Specs de servicios, init de datos, puertos, supervisor con runner falso.
 - `internal/daemon`: API JSON sobre socket unix con token `0600`; acciones tipadas en `protocol.go`; `Runtime` arranca API + DNS + web + supervisores y atiende señales.
 - `internal/dns`: DNS UDP en `127.0.0.1:53535`; responde A/AAAA para `*.test` y reenvía el resto a los nameservers de `/etc/resolv.conf`.
 - `internal/pki`: CA ECDSA P-256 de 10 años con clave `0600`; certificados por sitio con SANs base + wildcard.
-- `internal/web`: router por Host (incluye subdominios), archivos estáticos en `public/`, proxy FastCGI, TLS dinámico y detección de conflictos en 80/443.
+- `internal/web`: router por Host (incluye subdominios), archivos estáticos en `public/`, proxy FastCGI, TLS dinámico y detección de conflictos en los puertos configurados (8080/8443 por defecto).
 - `internal/fastcgi`: cliente mínimo RESPONDER sobre unix socket.
 - `internal/platform`: unidad `lair@<usuario>.service`, regla polkit solo para la unidad propia, drop-in de `systemd-resolved`, trust store y plan privilegiado renderizado como script único.
 - `internal/cli`: todos los comandos requeridos, modo daemon/offline, `exec` oculto con prompt TTY y render de los scripts de privilegios/reversión.
 
 Tests: API con token (incluye rechazo de unauthorized), DNS codec/servidor, PKI, FastCGI, router web, generación del plan privilegiado, dispatcher y CLI.
+
+## Fase 5 — App nativa y lanzador
+
+- Se elimina la SPA embebida (`internal/ui`). `internal/desktopapi` publica solo `POST /api` en `127.0.0.1:9797`: token en la cabecera `X-Lair-Token` (comparación en tiempo constante), sin query ni fragmento, CORS restringido a orígenes locales/Electron y sin HTML/CSS/JS.
+- `app/` contiene la app Electron + React + TypeScript: shell con sidebar, componentes base, tema claro/oscuro, i18n en/es/cs, cliente del bridge y `FakeDaemon` con fixtures. El renderer recibe URL y token por IPC (`contextIsolation`), sin filesystem.
+- `lair desktop` (alias `lair ui`) arranca el daemon si hace falta y lee `run/desktop.url` y `run/desktop.token` (`0600`). El `.deb` instala el lanzador `.desktop` y el icono.
+- Se mantiene la paridad de acciones con la CLI y la TUI; `app/scripts/check-actions.mjs` falla si el cliente declara una acción ausente en `internal/daemon/protocol.go`.
+- Tests: autenticación, CORS, llamadas al `Dispatcher` y ausencia de interfaz estática.
+
+## Fase 6 — Web configurable, proyectos Laravel y calidad
+
+- `internal/web` genera los hosts virtuales de los sitios aparcados en el servidor Go integrado, con FastCGI a PHP-FPM y certificados de la CA local (SNI restringido a sitios aparcados). Los cambios se aplican en caliente desde `config.json`, sin archivos de configuración externos que validar; **no se instala ningún servidor web**.
+- Un único action `web` configura puertos HTTP/HTTPS (8080/8443 por defecto), HTTPS, `domain` y `bind` para desktop, TUI y CLI. El servidor Go respeta `bind`: `0.0.0.0` expone la LAN, `127.0.0.1` es el aislado por defecto.
+- `internal/project` implementa la acción `project` compartida: `lair project info` / `lair project new` y los asistentes de desktop y TUI. `laravel/installer` se aísla en `COMPOSER_HOME`; credenciales por `DB_*`, nunca en argv ni en logs. SQL Server no es gestionado por Lair: se documenta la limitación (solo se escriben credenciales en `.env`).
+- `internal/nvm` carga `nvm.sh` con argv validado; toda gestión de Node pasa por `lair nvm ...`, sin `curl | bash` automático.
+- Internacionalización completa (en/es/cs) con `npm run i18n:check`, TUI Charm v2 con ayuda Glamour y grabación VHS, y correcciones de timeouts y filtrado de stderr de PHP-FPM.
+- Calidad: CI en `.github/workflows/ci.yml` (Go + app con Node 22, sin publicar releases), `.golangci.yml`, `make lint` y `make coverage`, ADRs en `docs/adr/` y documentación (README, SECURITY, CLI, ARCHITECTURE) reconciliada.
+
+Tests: enrutado web y hosts virtuales, web settings (bind, puertos y dominio), acción `project`, nvm con argv, i18n y paridad de acciones.
