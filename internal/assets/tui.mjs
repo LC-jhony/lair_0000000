@@ -22953,6 +22953,12 @@ var ACTIONS = {
   bootstrap: "bootstrap",
   installPHP: "install-php",
   installNode: "install-node",
+  uninstallPHP: "php-uninstall",
+  updateNode: "node-update",
+  uninstallNode: "node-uninstall",
+  updateComposer: "composer-update",
+  updateNpm: "npm-update",
+  retryJob: "job-retry",
   installService: "install-service",
   job: "job",
   jobs: "jobs",
@@ -22982,19 +22988,31 @@ var ACTIONS = {
   isolate: "isolate",
   ensureShims: "ensure-shims",
   restart: "restart",
-  updateCatalog: "update"
+  updateCatalog: "update",
+  uninstall: "uninstall",
+  firstRun: "first-run"
 };
 var HttpDaemonClient = class {
-  constructor(baseURL, token, fetchImpl = globalThis.fetch) {
+  constructor(baseURL, token, fetchImpl = globalThis.fetch, ipcCall) {
     this.token = token;
     this.fetchImpl = fetchImpl;
-    if (!token) throw new DaemonError("missing daemon token", 401);
+    this.ipcCall = ipcCall;
+    if (!token && !ipcCall) throw new DaemonError("missing daemon token", 401);
     this.base = baseURL.replace(/\/+$/, "");
   }
   token;
   fetchImpl;
+  ipcCall;
   base;
   async call(action, payload = {}, signal) {
+    if (this.ipcCall) {
+      try {
+        return await this.ipcCall(action, payload);
+      } catch (cause) {
+        if (cause instanceof DaemonError) throw cause;
+        throw new DaemonError(cause instanceof Error ? cause.message : "daemon call failed", 0);
+      }
+    }
     let response;
     const fetchImpl = this.fetchImpl;
     try {
@@ -23047,6 +23065,24 @@ var HttpDaemonClient = class {
   }
   installNode(version) {
     return this.call(ACTIONS.installNode, { version });
+  }
+  async uninstallPHP(minor) {
+    await this.call(ACTIONS.uninstallPHP, { minor });
+  }
+  updateNode(major) {
+    return this.call(ACTIONS.updateNode, { version: major });
+  }
+  async uninstallNode(major) {
+    await this.call(ACTIONS.uninstallNode, { version: major });
+  }
+  updateComposer() {
+    return this.call(ACTIONS.updateComposer);
+  }
+  updateNpm() {
+    return this.call(ACTIONS.updateNpm);
+  }
+  retryJob(id) {
+    return this.call(ACTIONS.retryJob, { id });
   }
   installService(id, version, port) {
     return this.call(ACTIONS.installService, { id, version, port });
@@ -23183,13 +23219,28 @@ var HttpDaemonClient = class {
     const result = await this.call(ACTIONS.updateCatalog);
     return result.text ?? "";
   }
+  async uninstall(deleteData = false) {
+    await this.call(ACTIONS.uninstall, { delete_data: deleteData });
+  }
+  firstRun() {
+    return this.call(ACTIONS.firstRun);
+  }
 };
 async function connectFromDesktop(fetchImpl) {
   const bridge = window.lairDesktop;
   if (!bridge) return null;
   const details = await bridge.connect();
   if (!details) return null;
-  return new HttpDaemonClient(details.url, details.token, fetchImpl);
+  if (typeof bridge.call === "function") {
+    return new HttpDaemonClient(
+      details.url,
+      "",
+      fetchImpl,
+      (action, payload) => bridge.call(action, payload)
+    );
+  }
+  const legacy = details;
+  return new HttpDaemonClient(details.url, legacy.token ?? "", fetchImpl);
 }
 
 // src/api/fixtures/demo.json
@@ -23472,6 +23523,20 @@ var FakeDaemon = class {
         return await this.installPHP(String(p.version));
       case ACTIONS.installNode:
         return await this.installNode(String(p.version));
+      case ACTIONS.uninstallPHP:
+        await this.uninstallPHP(String(p.minor));
+        return void 0;
+      case ACTIONS.updateNode:
+        return await this.updateNode(String(p.version));
+      case ACTIONS.uninstallNode:
+        await this.uninstallNode(String(p.version));
+        return void 0;
+      case ACTIONS.updateComposer:
+        return await this.updateComposer();
+      case ACTIONS.updateNpm:
+        return await this.updateNpm();
+      case ACTIONS.retryJob:
+        return this.retryJob(String(p.id));
       case ACTIONS.installService:
         return await this.installService(
           String(p.id),
@@ -23621,6 +23686,24 @@ var FakeDaemon = class {
   async useNode(version) {
     if (this.statusData.defaults) this.statusData.defaults.node = version;
   }
+  async uninstallPHP(minor) {
+    this.statusData.php = (this.statusData.php ?? []).filter((info) => (info.minor ?? info.version) !== minor);
+  }
+  async updateNode(major) {
+    return this.installNode(major);
+  }
+  async uninstallNode(major) {
+    this.statusData.node = (this.statusData.node ?? []).filter((v) => v.split(".")[0] !== major.replace(/^v/, ""));
+  }
+  async updateComposer() {
+    return { text: "tools/composer.phar" };
+  }
+  async updateNpm() {
+    return { text: "10.9.0" };
+  }
+  async retryJob(id) {
+    return this.job(id);
+  }
   async useService(id, version) {
     const service = this.statusData.services?.[id];
     if (service) {
@@ -23650,6 +23733,16 @@ var FakeDaemon = class {
   }
   async updateCatalog() {
     return "El cat\xE1logo firmado ya est\xE1 actualizado.";
+  }
+  async firstRun() {
+    return { jobs: [] };
+  }
+  async uninstall(_deleteData = false) {
+    this.statusData.php = [];
+    this.statusData.node = [];
+    this.statusData.composer = void 0;
+    this.statusData.services = {};
+    this.statusData.sites = [];
   }
   async logsList() {
     return Object.keys(this.logsData).sort();
@@ -24167,6 +24260,7 @@ function useLair(clientFactory2 = createClient) {
   const [status, setStatus] = (0, import_react37.useState)(null);
   const [error, setError] = (0, import_react37.useState)("");
   const [busy, setBusy] = (0, import_react37.useState)("");
+  const [jobProgress2, setJobProgress] = (0, import_react37.useState)(null);
   const aliveRef = (0, import_react37.useRef)(true);
   const busyRef = (0, import_react37.useRef)(false);
   const controllerRef = (0, import_react37.useRef)(null);
@@ -24249,6 +24343,7 @@ function useLair(clientFactory2 = createClient) {
     controllerRef.current = null;
     busyRef.current = false;
     if (aliveRef.current) setBusy("");
+    setJobProgress(null);
   }, []);
   const act = (0, import_react37.useCallback)(
     async (label, fn) => {
@@ -24263,6 +24358,7 @@ function useLair(clientFactory2 = createClient) {
         if (controller.signal.aborted || !aliveRef.current) return;
         const job = result;
         if (job && typeof job === "object" && job.id) {
+          setJobProgress(job);
           let failed = Boolean(job.error);
           let canceled = Boolean(job.canceled);
           if (!job.done && !failed && !canceled) {
@@ -24275,6 +24371,7 @@ function useLair(clientFactory2 = createClient) {
               }
               try {
                 const current = await client.job(job.id, controller.signal);
+                setJobProgress(current);
                 if (current.error || current.canceled) {
                   failed = Boolean(current.error);
                   canceled = Boolean(current.canceled);
@@ -24310,12 +24407,13 @@ function useLair(clientFactory2 = createClient) {
           busyRef.current = false;
           if (aliveRef.current) setBusy("");
         }
+        setJobProgress(null);
       }
     },
     [client, refresh]
   );
   const clearError = (0, import_react37.useCallback)(() => setError(""), []);
-  return { client, status, error, busy, refresh, act, cancel, clearError };
+  return { client, status, error, busy, jobProgress: jobProgress2, refresh, act, cancel, clearError };
 }
 
 // tui/hooks/use-theme.ts
@@ -27335,7 +27433,7 @@ function SitesPane({ state }) {
       item.secure ? /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Badge, { variant: "success", children: "HTTPS" }) : null
     ] }, item.name)) }),
     prompt.active ? /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(PromptLine, { label: mode === "new" ? t("project.name") : t("dash.siteName"), value: prompt.value }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Hint, { text: "\u2191/\u2193: select \xB7 p: park \xB7 l: link \xB7 n: new project \xB7 u: unlink \xB7 s: secure \xB7 o: open \xB7 e: HTTPS \xB7 v: detail \xB7 f: vhost" })
+    /* @__PURE__ */ (0, import_jsx_runtime19.jsx)(Hint, { text: "\u2191/\u2193: select \xB7 p: park \xB7 l: link \xB7 n: new project \xB7 u: unlink \xB7 s: secure \xB7 o: open \xB7 e: enable/disable \xB7 v: detail \xB7 f: vhost" })
   ] });
 }
 

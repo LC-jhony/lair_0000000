@@ -1,26 +1,38 @@
 #!/usr/bin/env bash
-# Crea el release v1.0.0 de Lair en LC-jhony/lair con todos los campos y assets.
+# Crea un release de Lair en LC-jhony/lair con todos los campos y assets.
+# Uso: scripts/create-release.sh [versión]   (por defecto 1.0.0)
 # Requiere GitHub CLI autenticado: gh auth login (o GITHUB_TOKEN en el entorno).
+# Con SKIP_BUILD=1 no reconstruye dist/ y usa los artefactos existentes.
 set -euo pipefail
 
 readonly REPO="LC-jhony/lair"
-readonly TAG="v1.0.0"
-readonly TITLE="Lair v1.0.0"
-readonly NOTES="RELEASE_NOTES.md"
+readonly VERSION="${1:-1.0.0}"
+readonly TAG="v$VERSION"
+readonly TITLE="Lair v$VERSION"
+readonly NOTES="RELEASE_NOTES_${VERSION}.md"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+if [ "${SKIP_BUILD:-0}" != 1 ]; then
+  echo "==> Construyendo artefactos $VERSION"
+  scripts/build-dist.sh "$VERSION"
+fi
+NOTES_FILE="$NOTES"
+if [ ! -f "$NOTES_FILE" ]; then
+  NOTES_FILE="RELEASE_NOTES.md"
+fi
+
 ASSETS=(
   "dist/SHA256SUMS"
-  "dist/lair_1.0.0_amd64.deb"
-  "dist/lair_1.0.0_arm64.deb"
-  "dist/lair_1.0.0_darwin_amd64.tar.gz"
-  "dist/lair_1.0.0_darwin_arm64.tar.gz"
-  "dist/lair_1.0.0_linux_amd64.tar.gz"
-  "dist/lair_1.0.0_linux_arm64.tar.gz"
-  "dist/lair_1.0.0_windows_amd64.zip"
-  "dist/lair_1.0.0_windows_arm64.zip"
+  "dist/lair_${VERSION}_amd64.deb"
+  "dist/lair_${VERSION}_arm64.deb"
+  "dist/lair_${VERSION}_darwin_amd64.tar.gz"
+  "dist/lair_${VERSION}_darwin_arm64.tar.gz"
+  "dist/lair_${VERSION}_linux_amd64.tar.gz"
+  "dist/lair_${VERSION}_linux_arm64.tar.gz"
+  "dist/lair_${VERSION}_windows_amd64.zip"
+  "dist/lair_${VERSION}_windows_arm64.zip"
 )
 
 if ! command -v gh >/dev/null 2>&1; then
@@ -53,7 +65,7 @@ git push origin "$TAG"
 
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   echo "==> El release ya existe: actualizando notas y reemplazando assets"
-  gh release edit "$TAG" --repo "$REPO" --title "$TITLE" --notes-file "$NOTES"
+  gh release edit "$TAG" --repo "$REPO" --title "$TITLE" --notes-file "$NOTES_FILE"
   for asset in "${ASSETS[@]}"; do
     name="$(basename "$asset")"
     if gh release view "$TAG" --repo "$REPO" --json assets --jq ".assets[].name" | grep -qx "$name"; then
@@ -66,7 +78,7 @@ else
   gh release create "$TAG" \
     --repo "$REPO" \
     --title "$TITLE" \
-    --notes-file "$NOTES" \
+    --notes-file "$NOTES_FILE" \
     --verify-tag \
     "${ASSETS[@]}"
 fi

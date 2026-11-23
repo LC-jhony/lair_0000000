@@ -24,6 +24,18 @@ if command -v dpkg-deb >/dev/null 2>&1; then HAVE_DEB=1; else
   echo "aviso: dpkg-deb no disponible; no se generarán los .deb" >&2
 fi
 
+# La app de escritorio se empaqueta dentro del .deb para que un solo paquete
+# abra la interfaz. Se genera con:
+#   cd app && npm ci && npm run dist                    (amd64)
+#   cd app && npx electron-builder --linux --arm64      (arm64)
+# Cada arquitectura debe llevar su propio binario Electron.
+desktop_dir() {
+  case "$1" in
+    amd64) printf '%s' "$ROOT/app/release/linux-unpacked" ;;
+    arm64) printf '%s' "$ROOT/app/release/linux-arm64-unpacked" ;;
+  esac
+}
+
 build_binary() {
   local os="$1" arch="$2" out="$3"
   echo "==> go build $os/$arch -> $(basename "$out")"
@@ -67,6 +79,15 @@ if [ "$HAVE_DEB" = 1 ]; then
     chmod 0644 "$root/usr/share/doc/lair/copyright"
     install -m 0644 assets/lair.desktop "$root/usr/share/applications/lair.desktop"
     install -m 0644 assets/lair.svg "$root/usr/share/icons/hicolor/scalable/apps/lair.svg"
+    install -m 0755 scripts/lair-desktop "$root/usr/bin/lair-desktop"
+    desktop_unpacked="$(desktop_dir "$arch")"
+    if [ -x "$desktop_unpacked/lair-desktop" ]; then
+      mkdir -p "$root/usr/share/lair/desktop"
+      cp -a "$desktop_unpacked/." "$root/usr/share/lair/desktop/"
+      echo "==> app Electron $arch incluida en el paquete"
+    else
+      echo "aviso: falta Electron $arch en $desktop_unpacked; el .deb no incluirá la interfaz" >&2
+    fi
     cat > "$root/DEBIAN/control" <<EOF
 Package: lair
 Version: $VERSION

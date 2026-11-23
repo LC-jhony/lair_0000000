@@ -1,0 +1,39 @@
+#!/bin/sh
+# Lanzador de la app de escritorio de Lair instalada con el paquete .deb.
+# Arranca el daemon si hace falta (el bridge se publica en run/) y ejecuta
+# Electron desde la copia instalada, con --no-sandbox solo cuando el helper
+# chrome-sandbox no tiene el bit setuid configurado.
+set -eu
+
+if command -v lair >/dev/null 2>&1; then
+  lair ui >/dev/null 2>&1 || true
+fi
+
+find_app() {
+  for candidate in \
+    /usr/share/lair/desktop/lair-desktop \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/lair-desktop/lair-desktop" \
+    "$HOME/Documentos/lair/app/release/linux-unpacked/lair-desktop"
+  do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! APP="$(find_app)"; then
+  echo "lair-desktop: no se encontró la app de escritorio." >&2
+  echo "Instala el paquete .deb de Lair o compílala con: cd app && npm run dist" >&2
+  exit 1
+fi
+
+SANDBOX="$(dirname "$APP")/chrome-sandbox"
+FLAGS=""
+if [ -f "$SANDBOX" ] && [ ! -u "$SANDBOX" ]; then
+  FLAGS="--no-sandbox"
+fi
+
+export DISPLAY="${DISPLAY:-:0}"
+exec "$APP" $FLAGS "$@"

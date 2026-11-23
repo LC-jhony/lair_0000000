@@ -52,47 +52,48 @@ lair doctor                     # diagnóstico si algo no responde
 
 ## Instalación
 
-### Binarios del release v1.0.0
+### Binarios del release v1.0.1
 
-Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.0>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario.
+Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.1>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario. El paquete `.deb` de Linux incluye además la **app de escritorio Electron** y el comando `lair-desktop`; el icono *Lair* del menú la abre directamente. Los comprimidos `.tar.gz`/`.zip` solo contienen el binario CLI.
 
 #### Linux x86_64 (amd64)
 
 ```sh
 mkdir -p ~/.local/bin && cd /tmp
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/lair_1.0.0_linux_amd64.tar.gz
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/SHA256SUMS
-grep ' lair_1.0.0_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
-tar -xzf lair_1.0.0_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/lair_1.0.1_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/SHA256SUMS
+grep ' lair_1.0.1_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
+tar -xzf lair_1.0.1_linux_amd64.tar.gz
 install -m 0755 lair ~/.local/bin/lair
 lair --help
 ```
 
-En **Linux arm64**, sustituye `amd64` por `arm64` en el nombre del artefacto. En Debian/Ubuntu también puedes instalar el paquete:
+En **Linux arm64**, sustituye `amd64` por `arm64` en el nombre del artefacto. En Debian/Ubuntu instala el `.deb` (incluye la app de escritorio):
 
 ```sh
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/lair_1.0.0_amd64.deb
-sudo apt install ./lair_1.0.0_amd64.deb      # usa arm64 en Raspberry Pi
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/lair_1.0.1_amd64.deb
+sudo apt install ./lair_1.0.1_amd64.deb      # usa arm64 en Raspberry Pi
+lair-desktop                                 # abre la app de escritorio
 ```
 
 #### macOS (Apple Silicon / Intel)
 
 ```sh
 mkdir -p ~/.local/bin && cd /tmp
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/lair_1.0.0_darwin_arm64.tar.gz
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.0/SHA256SUMS
-grep ' lair_1.0.0_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
-tar -xzf lair_1.0.0_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/lair_1.0.1_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/SHA256SUMS
+grep ' lair_1.0.1_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
+tar -xzf lair_1.0.1_darwin_arm64.tar.gz
 install -m 0755 lair ~/.local/bin/lair
 ```
 
-Para Intel, usa `lair_1.0.0_darwin_amd64.tar.gz`.
+Para Intel, usa `lair_1.0.1_darwin_amd64.tar.gz`.
 
 #### Windows (PowerShell)
 
 ```powershell
-$asset = 'lair_1.0.0_windows_amd64.zip'
-$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.0'
+$asset = 'lair_1.0.1_windows_amd64.zip'
+$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.1'
 Invoke-WebRequest -Uri "$base/$asset" -OutFile $asset
 Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile SHA256SUMS
 $expected = (Select-String -Path SHA256SUMS -Pattern " $asset`$").Line.Split(' ')[0]
@@ -104,7 +105,7 @@ Move-Item lair.exe $dir -Force
 [Environment]::SetEnvironmentVariable('Path', "$env:Path;$dir", 'User')
 ```
 
-Para ARM64 usa `lair_1.0.0_windows_arm64.zip`.
+Para ARM64 usa `lair_1.0.1_windows_arm64.zip`.
 
 ### Desde el código fuente
 
