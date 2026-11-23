@@ -30,8 +30,24 @@ func TestGenerateUnit(t *testing.T) {
 	if !strings.Contains(f.PolkitContent, "lair@") || !strings.Contains(f.PolkitContent, "subject.user") {
 		t.Errorf("polkit = %s", f.PolkitContent)
 	}
-	if !strings.Contains(f.ResolvedContent, "Domains=~test") || !strings.Contains(f.ResolvedContent, "DNS=127.0.0.1#53535") {
+	if !strings.Contains(f.ResolvedContent, "Domains=~test") || !strings.Contains(f.ResolvedContent, "DNS=127.0.0.1:53535") {
 		t.Errorf("resolved = %s", f.ResolvedContent)
+	}
+	for _, want := range []string{
+		"port=53535", "listen-address=127.0.0.1", "bind-interfaces",
+		"no-resolv", "no-hosts", "address=/test/127.0.0.1",
+	} {
+		if !strings.Contains(f.DnsmasqConfContent, want) {
+			t.Errorf("dnsmasq.conf missing %q:\n%s", want, f.DnsmasqConfContent)
+		}
+	}
+	if !strings.Contains(f.DNSUnitContent, "/usr/sbin/dnsmasq --keep-in-foreground --conf-file=") ||
+		!strings.Contains(f.DNSUnitPath, "lair-dns.service") {
+		t.Errorf("dns unit = %s / %s", f.DNSUnitPath, f.DNSUnitContent)
+	}
+	if !strings.Contains(f.FallbackResolvedContent, "DNS=127.0.0.1:53535") ||
+		!strings.Contains(f.FallbackResolvedContent, "Domains=~test") {
+		t.Errorf("fallback = %s", f.FallbackResolvedContent)
 	}
 	if !strings.HasSuffix(f.DropInPath, "lair@jhony.service.d/10-lair.conf") {
 		t.Errorf("drop-in path = %s", f.DropInPath)
@@ -75,6 +91,55 @@ func TestPrivilegedPlanScript(t *testing.T) {
 	}
 	if len(plan.Actions) < 3 {
 		t.Fatalf("expected multiple privileged actions, got %d", len(plan.Actions))
+	}
+}
+
+func TestPrivilegedDNSScriptIsSafeAndTransactional(t *testing.T) {
+	if Current() != KindSystemd {
+		t.Skip("systemd only on linux")
+	}
+	plan, err := BuildPlan(UnitConfig{
+		User: "jhony", Home: "/home/jhony", DataDir: "/home/jhony/.local/share/lair",
+		ExecPath: "/home/jhony/.local/share/lair/bin/lair", Domain: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := plan.Script()
+	for _, want := range []string{
+		"port=53535", "listen-address=127.0.0.1", "bind-interfaces",
+		"no-resolv", "no-hosts", "address=/test/127.0.0.1",
+		"/usr/sbin/dnsmasq --keep-in-foreground --conf-file=",
+		"/etc/systemd/system/lair-dns.service", "systemctl enable --now lair-dns.service",
+		"DNS=127.0.0.1:53535", "Domains=~test",
+		"sudo setcap cap_net_bind_service=+ep /home/jhony/.local/share/lair/bin/lair",
+		"backup /etc/resolv.conf", "backup /etc/NetworkManager/NetworkManager.conf",
+		"backup " + shQuote(ResolvedDropIn) + " 50-lair.conf",
+		"rm -f /etc/dnsmasq.d/valet /etc/NetworkManager/conf.d/valet.conf /etc/NetworkManager/dnsmasq.d/valet",
+		"getent hosts lair.test", "getent ahostsv4 example.com",
+		"rollback()", "restore /etc/resolv.conf",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("script missing %q", want)
+		}
+	}
+	// The fallback must keep the modern resolved syntax and warn instead of
+	// breaking public DNS when dnsmasq cannot bind the high port.
+	for _, want := range []string{
+		"command -v dnsmasq", "port_busy()", "DNS=127.0.0.1:53535",
+		"Internet sigue funcionando", "exit 0",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("fallback missing %q", want)
+		}
+	}
+	// The safe dnsmasq path must be reached only after the fallback check.
+	if strings.Index(script, "port_busy()") > strings.Index(script, "systemctl enable --now lair-dns.service") {
+		t.Error("dnsmasq service started before the availability/fallback check")
+	}
+	resolvedWrite := strings.Index(script, "cat > "+shQuote(ResolvedDropIn))
+	if strings.Index(script, "backup /etc/resolv.conf") > resolvedWrite || resolvedWrite < 0 {
+		t.Error("resolv.conf was modified before being backed up")
 	}
 }
 

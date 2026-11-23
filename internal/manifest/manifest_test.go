@@ -14,6 +14,41 @@ import (
 )
 
 // signedFixture builds a signed manifest with a fresh keypair.
+func TestNewCatalogRejectsEmptyBaseURLs(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bases := range [][]string{
+		{""},
+		{"https://example.test/catalog", "  "},
+		{"https://example.test/catalog", ""}, // trailing comma in an env var
+	} {
+		if _, err := NewCatalog(CatalogConfig{
+			PublicKey: pub, Channel: "stable", BaseURLs: bases, Root: t.TempDir(),
+		}); err == nil {
+			t.Errorf("empty base URL accepted: %q", bases)
+		}
+	}
+}
+
+func TestFetchSkipsEmptyBaseURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	// Construct directly to exercise fetch's defensive branch even if a caller
+	// bypassed NewCatalog validation.
+	c := &Catalog{
+		cfg:  CatalogConfig{BaseURLs: []string{"", "  ", srv.URL}, Channel: "stable"},
+		http: &http.Client{}, maxAge: time.Hour, now: time.Now,
+	}
+	body, err := c.fetch(context.Background(), "manifest.json")
+	if err != nil || string(body) != "ok" {
+		t.Fatalf("fetch = %q, %v", body, err)
+	}
+}
+
 func signedFixture(t *testing.T, mutate func(*Manifest)) (data, sig []byte, pub ed25519.PublicKey) {
 	t.Helper()
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -100,7 +135,8 @@ func TestVerifyValidAndRejections(t *testing.T) {
 
 func TestArtifactChecks(t *testing.T) {
 	data, sig, pub := signedFixture(t, nil)
-	m, err := Verify(data, sig, pub, VerifyOptions{Channel: "stable"})
+	now := time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+	m, err := Verify(data, sig, pub, VerifyOptions{Channel: "stable", Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +163,40 @@ func TestArtifactChecks(t *testing.T) {
 	}
 	if len(ym.Versions("php", "linux-x64")) != 0 {
 		t.Fatal("yanked version should be excluded")
+	}
+}
+
+func TestArtifactWithComponentsAndFiles(t *testing.T) {
+	valid := Artifact{
+		Build: "N1", URL: "cli.tar.gz",
+		SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		Files:  []FileMap{{From: "php", To: "bin/php"}},
+		Components: []Component{{
+			URL:    "fpm.tar.gz",
+			SHA256: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+			Files:  []FileMap{{From: "php-fpm", To: "sbin/php-fpm"}},
+		}},
+	}
+	if err := VerifyArtifact(valid); err != nil {
+		t.Fatalf("valid artifact rejected: %v", err)
+	}
+
+	bad := valid
+	bad.Components[0].SHA256 = "short"
+	if err := VerifyArtifact(bad); err == nil {
+		t.Fatal("component without sha256 accepted")
+	}
+
+	bad = valid
+	bad.Files[0].To = "../escape"
+	if err := VerifyArtifact(bad); err == nil {
+		t.Fatal("traversing file map accepted")
+	}
+
+	bad = valid
+	bad.Components[0].Files[0].From = "/etc/passwd"
+	if err := VerifyArtifact(bad); err == nil {
+		t.Fatal("absolute component member accepted")
 	}
 }
 

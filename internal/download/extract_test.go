@@ -78,6 +78,26 @@ func TestExtractOfficialStyleArchive(t *testing.T) {
 // TestExtractMariaDBLayout checks the other official layout Lair relies on:
 // MariaDB's tarball wraps everything in a version directory but keeps its
 // initialisation script under scripts/ rather than bin/.
+func TestInstallRawBinary(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "meilisearch")
+	if err := os.WriteFile(file, []byte("#!/bin/sh\ntrue\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "services", "meilisearch", "1.57.0-buildN1")
+	if err := Install([]Source{{Archive: file, RawTo: "bin/meilisearch"}}, dest, []string{"bin/meilisearch"}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dest, "bin", "meilisearch"))
+	if err != nil || string(data) != "#!/bin/sh\ntrue\n" {
+		t.Fatalf("raw binary = %q, %v", data, err)
+	}
+	info, err := os.Stat(filepath.Join(dest, "bin", "meilisearch"))
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("raw binary is not executable: %v", err)
+	}
+}
+
 func TestExtractMariaDBLayout(t *testing.T) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)

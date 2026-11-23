@@ -14,6 +14,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+)
+
+const (
+	defaultDownloadTimeout = 5 * time.Minute
+	responseHeaderTimeout  = 30 * time.Second
+	// absoluteMaxBytes is a hard ceiling even when the artifact has no size.
+	absoluteMaxBytes = 2 << 30 // 2 GiB
 )
 
 // Progress is emitted while streaming a download.
@@ -31,11 +39,21 @@ type Downloader struct {
 	OnProgress func(Progress)
 }
 
+// defaultHTTPClient is shared so idle connections are reused and not leaked
+// once per artifact. Both the overall timeout and the header timeout are set:
+// a server that accepts a socket but never answers must not hang an install.
+var defaultHTTPClient = &http.Client{
+	Timeout: defaultDownloadTimeout,
+	Transport: &http.Transport{
+		ResponseHeaderTimeout: responseHeaderTimeout,
+	},
+}
+
 func (d *Downloader) client() *http.Client {
 	if d.HTTP != nil {
 		return d.HTTP
 	}
-	return &http.Client{}
+	return defaultHTTPClient
 }
 
 // DownloadTo streams the artifact to <destDir>/<name> via a .part file and a
@@ -48,6 +66,13 @@ func (d *Downloader) DownloadTo(ctx context.Context, urlPath, wantSHA string, de
 // DownloadToProgress is DownloadTo with a per-call progress callback, so
 // concurrent installs do not race over a shared callback field.
 func (d *Downloader) DownloadToProgress(ctx context.Context, urlPath, wantSHA string, destDir, name string, onProgress func(Progress)) (string, error) {
+	return d.DownloadToProgressSized(ctx, urlPath, wantSHA, destDir, name, 0, onProgress)
+}
+
+// DownloadToProgressSized is DownloadToProgress with a byte ceiling derived
+// from the signed artifact size. A zero maxBytes means "no artifact size
+// known": the hard absoluteMaxBytes ceiling still applies.
+func (d *Downloader) DownloadToProgressSized(ctx context.Context, urlPath, wantSHA string, destDir, name string, maxBytes int64, onProgress func(Progress)) (string, error) {
 	if wantSHA == "" || len(wantSHA) != 64 {
 		return "", fmt.Errorf("artifact sha256 is required (64 hex chars)")
 	}
@@ -69,7 +94,7 @@ func (d *Downloader) DownloadToProgress(ctx context.Context, urlPath, wantSHA st
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		err := d.downloadOne(ctx, url, part, wantSHA, onProgress)
+		err := d.downloadOne(ctx, url, part, wantSHA, maxBytes, onProgress)
 		if err == nil {
 			// Hash matched; move to the verified name inside the temp dir.
 			final := filepath.Join(tmpDir, name)
@@ -136,12 +161,20 @@ func (d *Downloader) openSource(ctx context.Context, url string) (io.ReadCloser,
 	return resp.Body, resp.ContentLength, nil
 }
 
-func (d *Downloader) downloadOne(ctx context.Context, url, part, wantSHA string, onProgress func(Progress)) error {
+func (d *Downloader) downloadOne(ctx context.Context, url, part, wantSHA string, maxBytes int64, onProgress func(Progress)) error {
 	body, total, err := d.openSource(ctx, url)
 	if err != nil {
 		return err
 	}
 	defer body.Close()
+
+	// Never read (or keep) more than the signed manifest declares. One extra
+	// byte is read to detect an oversized body without buffering it.
+	limit := int64(absoluteMaxBytes)
+	if maxBytes > 0 && maxBytes < limit {
+		limit = maxBytes
+	}
+	body = io.NopCloser(io.LimitReader(body, limit+1))
 
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -155,6 +188,9 @@ func (d *Downloader) downloadOne(ctx context.Context, url, part, wantSHA string,
 	for {
 		n, readErr := body.Read(buf)
 		if n > 0 {
+			if written+int64(n) > limit {
+				return fmt.Errorf("artifact exceeds declared size (%d bytes)", limit)
+			}
 			if _, err := io.MultiWriter(f, hash).Write(buf[:n]); err != nil {
 				return fmt.Errorf("write: %w", err)
 			}

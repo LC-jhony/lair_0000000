@@ -1,19 +1,154 @@
 {
   "schema": 1,
   "channel": "stable",
-  "serial": 1000,
-  "generated": "2026-11-17T00:00:00Z",
+  "serial": 1006,
+  "generated": "2026-11-22T22:10:00Z",
   "expires": "2030-01-01T00:00:00Z",
   "packages": {
-    "mariadb": {
-      "11.4.7": {
+    "php": {
+      "8.1.34": {
         "linux-x64": {
           "build": "N1",
-          "url": "https://archive.mariadb.org/mariadb-11.4.7/bintar-linux-systemd-x86_64/mariadb-11.4.7-linux-systemd-x86_64.tar.gz",
-          "sha256": "805e953042fd2383139f3f7174bee412a21b7d0c57ee69a4c9732989dccd42d3",
-          "size": 374486201,
-          "published": "2026-11-17T00:00:00Z",
-          "prerelease": false
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.1.34-cli-linux-x86_64.tar.gz",
+          "sha256": "4caa8b82b574212b2f7af83cc800b23e0529b3dec85b8b2887547f909e717143",
+          "size": 11594685,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.1.34-fpm-linux-x86_64.tar.gz",
+              "sha256": "7995c72719d6574c50a727a30c51d6e63adbd4f694150d9562489efd093f4210",
+              "size": 11618250,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "8.2.32": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.2.32-cli-linux-x86_64.tar.gz",
+          "sha256": "2e609bb88bae88661dbd447e409531f7c36931adff480d8a0a74e812b889d1be",
+          "size": 11666920,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.2.32-fpm-linux-x86_64.tar.gz",
+              "sha256": "6e14e116836f9eab42451619fb4d68117ecea4bc4b1efd7011aaee914033f800",
+              "size": 11690460,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "8.3.32": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.3.32-cli-linux-x86_64.tar.gz",
+          "sha256": "d7ff2bc40846f4efed2757e5929f7469c96f672fbf33eb4bb80cd695534750fe",
+          "size": 11744291,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.3.32-fpm-linux-x86_64.tar.gz",
+              "sha256": "78d9ac9d52fedacc33d428196d0e5e9ace8ac010091c334daae85a669370f861",
+              "size": 11769021,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "8.4.23": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-cli-linux-x86_64.tar.gz",
+          "sha256": "1aeed5bc7967977ca5b1da7163acd91bf9ba3ac56037045d4e91ee2ff2712bb7",
+          "size": 12375301,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.4.23-fpm-linux-x86_64.tar.gz",
+              "sha256": "baa5ddcf2f9aabff78848cb6851bb104a4c0873347b8ee65eb9bcf4760a4d31a",
+              "size": 12398139,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "8.5.8": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://dl.static-php.dev/static-php-cli/common/php-8.5.8-cli-linux-x86_64.tar.gz",
+          "sha256": "517a18e0f0874de35669fe134eb3c52508e128a6d1da5bf890760cb800ada410",
+          "size": 12931817,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "php",
+              "to": "bin/php"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://dl.static-php.dev/static-php-cli/common/php-8.5.8-fpm-linux-x86_64.tar.gz",
+              "sha256": "836412ac76432e9f8e49a88c440c381acb2d262cc6dab4ba0a80468ab568a239",
+              "size": 12954233,
+              "files": [
+                {
+                  "from": "php-fpm",
+                  "to": "sbin/php-fpm"
+                }
+              ]
+            }
+          ]
         }
       }
     },
@@ -72,6 +207,452 @@
           "published": "2026-11-17T00:00:00Z",
           "prerelease": false,
           "lts": "Lithium"
+        }
+      }
+    },
+    "mariadb": {
+      "11.4.7": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://archive.mariadb.org/mariadb-11.4.7/bintar-linux-systemd-x86_64/mariadb-11.4.7-linux-systemd-x86_64.tar.gz",
+          "sha256": "805e953042fd2383139f3f7174bee412a21b7d0c57ee69a4c9732989dccd42d3",
+          "size": 374486201,
+          "published": "2026-11-17T00:00:00Z",
+          "prerelease": false
+        }
+      },
+      "11.8.9": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://registry.layerbase.host/mariadb-11.8.9/mariadb-11.8.9-linux-x64.tar.gz",
+          "sha256": "40883a2f2fbd51608d63ac760718b00ef3f73981627e21c8290214ea2a06a5a5",
+          "size": 410414661,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        }
+      }
+    },
+    "postgres": {
+      "18.7.0": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://github.com/theseus-rs/postgresql-binaries/releases/download/18.7.0/postgresql-18.7.0-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "53ca01952cb581145e4fb16b6b3b675da345a82879f350707b9f65863a0642f4",
+          "size": 40530262,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        }
+      },
+      "17.12.0": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://github.com/theseus-rs/postgresql-binaries/releases/download/17.12.0/postgresql-17.12.0-x86_64-unknown-linux-gnu.tar.gz",
+          "sha256": "af316b6e42266ec0a153bdc9194e0b1b5f12c9ce4f0b13d9a96dfca77d9aaecc",
+          "size": 40118562,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        }
+      }
+    },
+    "composer": {
+      "2.11.2": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://getcomposer.org/download/2.11.2/composer.phar",
+          "sha256": "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028",
+          "size": 0,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        },
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://getcomposer.org/download/2.11.2/composer.phar",
+          "sha256": "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028",
+          "size": 0,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        },
+        "macos-x64": {
+          "build": "N1",
+          "url": "https://getcomposer.org/download/2.11.2/composer.phar",
+          "sha256": "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028",
+          "size": 0,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://getcomposer.org/download/2.11.2/composer.phar",
+          "sha256": "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028",
+          "size": 0,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        },
+        "windows-x64": {
+          "build": "N1",
+          "url": "https://getcomposer.org/download/2.11.2/composer.phar",
+          "sha256": "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028",
+          "size": 0,
+          "published": "2026-11-18T00:00:00Z",
+          "prerelease": false
+        }
+      }
+    },
+    "mongodb": {
+      "8.0.38": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-ubuntu2404-8.0.38.tgz",
+          "sha256": "2885d4382bd47b96bfaf3edc7dec0ef44463e3e2a79479f584d20deb6182cda9",
+          "size": 105803359,
+          "published": "2026-11-21T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "mongodb-linux-x86_64-ubuntu2404-8.0.38/bin/mongod",
+              "to": "bin/mongod"
+            }
+          ],
+          "components": [
+            {
+              "url": "https://github.com/mongodb-js/mongosh/releases/download/v2.14.3/mongosh-2.14.3-linux-x64-openssl3.tgz",
+              "sha256": "def63b72a7f3af042f0fb9f4cfa28669efc933ea5d718fd8210d7eba519706c0",
+              "size": 91449030,
+              "files": [
+                {
+                  "from": "mongosh-2.14.3-linux-x64-openssl3/bin/mongosh",
+                  "to": "bin/mongosh"
+                },
+                {
+                  "from": "mongosh-2.14.3-linux-x64-openssl3/bin/mongosh_crypt_v1.so",
+                  "to": "bin/mongosh_crypt_v1.so"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "valkey": {
+      "9.2.0": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://download.valkey.io/releases/valkey-9.2.0-jammy-x86_64.tar.gz",
+          "sha256": "27ea653c549c604840f1c676e3d08818ac06019a1a2f353a8ccbb7aabd4edb66",
+          "size": 46759925,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "valkey-9.2.0-jammy-x86_64/bin/valkey-server",
+              "to": "bin/valkey-server"
+            },
+            {
+              "from": "valkey-9.2.0-jammy-x86_64/bin/valkey-cli",
+              "to": "bin/valkey-cli"
+            }
+          ]
+        },
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://download.valkey.io/releases/valkey-9.2.0-jammy-arm64.tar.gz",
+          "sha256": "03c5cd1383adb6e189b2c579da01c6999e3dc096f9e9b0518bbaaf0ddb56d1cf",
+          "size": 46686566,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "valkey-9.2.0-jammy-arm64/bin/valkey-server",
+              "to": "bin/valkey-server"
+            },
+            {
+              "from": "valkey-9.2.0-jammy-arm64/bin/valkey-cli",
+              "to": "bin/valkey-cli"
+            }
+          ]
+        }
+      }
+    },
+    "redis": {
+      "7.4.6": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://packages.redis.io/redis-stack/redis-stack-server-7.4.0-v7.jammy.x86_64.tar.gz",
+          "sha256": "87120cc89d223a8c22f4173be7bff6047e7a5d3a9347d2d6d5592ac1309ae704",
+          "size": 59106395,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "redis-stack-server-7.4.0-v7/bin/redis-server",
+              "to": "bin/redis-server"
+            },
+            {
+              "from": "redis-stack-server-7.4.0-v7/bin/redis-cli",
+              "to": "bin/redis-cli"
+            }
+          ]
+        },
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://packages.redis.io/redis-stack/redis-stack-server-7.4.0-v7.jammy.arm64.tar.gz",
+          "sha256": "11b2c712511043c6dec194efce7eb755196953f127aabc1f2f4ca69e19f30ff8",
+          "size": 45811048,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "redis-stack-server-7.4.0-v7/bin/redis-server",
+              "to": "bin/redis-server"
+            },
+            {
+              "from": "redis-stack-server-7.4.0-v7/bin/redis-cli",
+              "to": "bin/redis-cli"
+            }
+          ]
+        }
+      }
+    },
+    "sqlite3": {
+      "3.54.1": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://www.sqlite.org/2026/sqlite-tools-linux-x64-3540100.zip",
+          "sha256": "a21062b333c7d66d7d8c42054c0fab1c1899729185289ad14bd4f25f9f576d14",
+          "size": 4324601,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "sqlite3",
+              "to": "bin/sqlite3"
+            }
+          ]
+        },
+        "macos-x64": {
+          "build": "N1",
+          "url": "https://www.sqlite.org/2026/sqlite-tools-osx-x64-3540100.zip",
+          "sha256": "57f9bee875e82ff97541704f49b2def7ebd9d3f831b377f706b5fb41e339976f",
+          "size": 4563670,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "sqlite3",
+              "to": "bin/sqlite3"
+            }
+          ]
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://www.sqlite.org/2026/sqlite-tools-osx-arm64-3540100.zip",
+          "sha256": "f5ba6f9c08bcb3b7220dea07238cd3de88b936cf5b956d7fe458bf2ff0782db6",
+          "size": 4538997,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "sqlite3",
+              "to": "bin/sqlite3"
+            }
+          ]
+        },
+        "windows-x64": {
+          "build": "N1",
+          "url": "https://www.sqlite.org/2026/sqlite-tools-win-x64-3540100.zip",
+          "sha256": "fb20997ade5583a5fbf1e36db7bc3c82c9416b3f314f16961e1572aa4e49487d",
+          "size": 6984432,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "sqlite3.exe",
+              "to": "bin/sqlite3.exe"
+            }
+          ]
+        },
+        "windows-arm64": {
+          "build": "N1",
+          "url": "https://www.sqlite.org/2026/sqlite-tools-win-arm64-3540100.zip",
+          "sha256": "b5f77486ce53f3458b8443eda928ddf4312eea5d4dd3adb68851ff39028eee05",
+          "size": 5622381,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "sqlite3.exe",
+              "to": "bin/sqlite3.exe"
+            }
+          ]
+        }
+      }
+    },
+    "meilisearch": {
+      "1.57.0": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://github.com/meilisearch/meilisearch/releases/download/v1.57.0/meilisearch-linux-amd64",
+          "sha256": "cc5c8825d6effd5295c534fd2fb92f14410eb9a14a88a012805cb239f2dc7969",
+          "size": 357349024,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "raw": "bin/meilisearch"
+        },
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://github.com/meilisearch/meilisearch/releases/download/v1.57.0/meilisearch-linux-aarch64",
+          "sha256": "0e670a95eda37bf53afb04d495d8647a1a68708b1688f31ac89cbf5851152779",
+          "size": 350952184,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "raw": "bin/meilisearch"
+        },
+        "macos-x64": {
+          "build": "N1",
+          "url": "https://github.com/meilisearch/meilisearch/releases/download/v1.57.0/meilisearch-macos-amd64",
+          "sha256": "253ecf09ab119847af7dcc9ebdb233cbe5d612bfe73925008ee87f7c5572ebd5",
+          "size": 351390264,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "raw": "bin/meilisearch"
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://github.com/meilisearch/meilisearch/releases/download/v1.57.0/meilisearch-macos-apple-silicon",
+          "sha256": "fdf28ee5e71bf0bad35d1a95b17cee87e635c80d8985954ecb637c7de90b83c9",
+          "size": 348444336,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "raw": "bin/meilisearch"
+        },
+        "windows-x64": {
+          "build": "N1",
+          "url": "https://github.com/meilisearch/meilisearch/releases/download/v1.57.0/meilisearch-windows-amd64.exe",
+          "sha256": "032cd009e73a16ff77bbbf1fc911a03d6f8672f57e02d8a43310c63732bf6888",
+          "size": 353078784,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "raw": "bin/meilisearch.exe"
+        }
+      }
+    },
+    "typesense": {
+      "30.2": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://dl.typesense.org/releases/30.2/typesense-server-30.2-linux-amd64.tar.gz",
+          "sha256": "cd791605e7c6cc7be457794f534cd4b9f9d361781adb10e40020efc22840ebc3",
+          "size": 139602519,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "typesense-server",
+              "to": "bin/typesense-server"
+            }
+          ]
+        },
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://dl.typesense.org/releases/30.2/typesense-server-30.2-linux-arm64.tar.gz",
+          "sha256": "a9b9d6e2927c863900306290e8532c17f66bdff34ef2ad043b24ed4ccec8a6bc",
+          "size": 135501041,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "typesense-server",
+              "to": "bin/typesense-server"
+            }
+          ]
+        },
+        "macos-x64": {
+          "build": "N1",
+          "url": "https://dl.typesense.org/releases/30.2/typesense-server-30.2-darwin-amd64.tar.gz",
+          "sha256": "6aa4d2d85838e03fdde9dcef4bf1584a46fc1840a215e5cbed288b63365eae75",
+          "size": 40305723,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "typesense-server",
+              "to": "bin/typesense-server"
+            }
+          ]
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://dl.typesense.org/releases/30.2/typesense-server-30.2-darwin-arm64.tar.gz",
+          "sha256": "7d8d6d0c33930ad20ea23dd184250547b16615944be891b2078e8a075152fa7e",
+          "size": 38399663,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "typesense-server",
+              "to": "bin/typesense-server"
+            }
+          ]
+        }
+      }
+    },
+    "rustfs": {
+      "1.0.6": {
+        "linux-x64": {
+          "build": "N1",
+          "url": "https://github.com/rustfs/rustfs/releases/download/1.0.6/rustfs-linux-x86_64-gnu-v1.0.6.zip",
+          "sha256": "4f0bf3fecbe861467427ff506aee22c302cfd5ac8b7dcbde71714f8e5e680dea",
+          "size": 123551099,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "rustfs",
+              "to": "bin/rustfs"
+            }
+          ]
+        },
+        "linux-arm64": {
+          "build": "N1",
+          "url": "https://github.com/rustfs/rustfs/releases/download/1.0.6/rustfs-linux-aarch64-gnu-v1.0.6.zip",
+          "sha256": "fde8485aa2580ad774ba8588b0b51b68790ff28677fb27024ea68d8ab2be8e00",
+          "size": 119760716,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "rustfs",
+              "to": "bin/rustfs"
+            }
+          ]
+        },
+        "macos-arm64": {
+          "build": "N1",
+          "url": "https://github.com/rustfs/rustfs/releases/download/1.0.6/rustfs-macos-aarch64-v1.0.6.zip",
+          "sha256": "e0bf7e8aeee45490034576fde6513377db81844d8c40e24c57269e9bb274882f",
+          "size": 97957409,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "rustfs",
+              "to": "bin/rustfs"
+            }
+          ]
+        },
+        "windows-x64": {
+          "build": "N1",
+          "url": "https://github.com/rustfs/rustfs/releases/download/1.0.6/rustfs-windows-x86_64-v1.0.6.zip",
+          "sha256": "d718157c08ffcbc32e667176f941d6d36b37c7d73335b9f82d4d30a2d5ea5393",
+          "size": 118469926,
+          "published": "2026-11-22T00:00:00Z",
+          "prerelease": false,
+          "files": [
+            {
+              "from": "rustfs.exe",
+              "to": "bin/rustfs.exe"
+            }
+          ]
         }
       }
     }

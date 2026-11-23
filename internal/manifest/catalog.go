@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,15 +17,24 @@ import (
 // refresh is attempted.
 const DefaultMaxAge = 6 * time.Hour
 
+// DefaultBaseURLs are the signed-manifest mirrors, tried in order. Trust comes
+// from the Ed25519 signature, not from the host that served the manifest.
+var DefaultBaseURLs = []string{
+	"https://raw.githubusercontent.com/lair-sh/lair/main/catalog",
+	"https://cdn.lair.sh/stable",
+	"https://lair-builds.github.io/stable",
+}
+
 // CatalogConfig configures a Catalog. PublicKey/Channel/BaseURLs are required.
 type CatalogConfig struct {
-	PublicKey ed25519.PublicKey
-	Channel   string
-	BaseURLs  []string // tried in order; trust comes from the signature, not the host
-	Root      string   // data root, used for the cache and serial store
-	HTTP      *http.Client
-	MaxAge    time.Duration
-	Now       func() time.Time
+	PublicKey    ed25519.PublicKey
+	Channel      string
+	BaseURLs     []string // tried in order; trust comes from the signature, not the host
+	Root         string   // data root, used for the cache and serial store
+	ManifestName string   // defaults to manifest.json; beta uses manifest-beta.json
+	HTTP         *http.Client
+	MaxAge       time.Duration
+	Now          func() time.Time
 }
 
 // Catalog holds the currently accepted manifest. It loads from cache at
@@ -56,8 +66,16 @@ func NewCatalog(cfg CatalogConfig) (*Catalog, error) {
 	if len(cfg.BaseURLs) == 0 {
 		return nil, fmt.Errorf("at least one base URL is required")
 	}
+	for _, base := range cfg.BaseURLs {
+		if strings.TrimSpace(base) == "" {
+			return nil, fmt.Errorf("base URL must not be empty")
+		}
+	}
 	if cfg.Root == "" {
 		return nil, fmt.Errorf("data root is required")
+	}
+	if cfg.ManifestName == "" {
+		cfg.ManifestName = "manifest.json"
 	}
 	client := cfg.HTTP
 	if client == nil {
@@ -79,7 +97,8 @@ func NewCatalog(cfg CatalogConfig) (*Catalog, error) {
 
 func (c *Catalog) cachePaths() (string, string) {
 	dir := filepath.Join(c.cfg.Root, "cache")
-	return filepath.Join(dir, "manifest.json"), filepath.Join(dir, "manifest.json.sig")
+	name := c.cfg.ManifestName
+	return filepath.Join(dir, name), filepath.Join(dir, name+".sig")
 }
 
 // LoadFromCache loads and re-verifies the cached manifest. A tampered or
@@ -170,7 +189,12 @@ func (c *Catalog) Subscribe(fn func(*Manifest)) {
 func (c *Catalog) fetch(ctx context.Context, name string) ([]byte, error) {
 	var lastErr error
 	for _, base := range c.cfg.BaseURLs {
-		url := base
+		url := strings.TrimSpace(base)
+		if url == "" {
+			// Be defensive even when a Catalog was built before validation
+			// (or a caller mutated cfg): never build a URL from "".
+			continue
+		}
 		if url[len(url)-1] != '/' {
 			url += "/"
 		}
@@ -202,11 +226,11 @@ func (c *Catalog) fetch(ctx context.Context, name string) ([]byte, error) {
 // Refresh downloads, verifies and (on success) persists a new manifest. It
 // returns true when the accepted manifest actually changed.
 func (c *Catalog) Refresh(ctx context.Context) (bool, error) {
-	data, err := c.fetch(ctx, "manifest.json")
+	data, err := c.fetch(ctx, c.cfg.ManifestName)
 	if err != nil {
 		return false, err
 	}
-	sig, err := c.fetch(ctx, "manifest.json.sig")
+	sig, err := c.fetch(ctx, c.cfg.ManifestName+".sig")
 	if err != nil {
 		return false, err
 	}
@@ -267,18 +291,18 @@ func (c *Catalog) Stale() bool {
 	return c.now().Sub(c.fetchedAt) > c.maxAge
 }
 
+// RefreshInterval is how often the daemon polls for a newer signed catalog.
+// A manifest older than DefaultMaxAge is refreshed on the first tick.
+const RefreshInterval = time.Hour
+
 // Start loads the cache and runs a background refresh loop until ctx is done.
-// It refreshes immediately when stale, then every maxAge/2.
+// It refreshes immediately when stale, then once an hour.
 func (c *Catalog) Start(ctx context.Context) error {
 	if err := c.LoadFromCache(); err != nil {
 		return err
 	}
 	go func() {
-		interval := c.maxAge / 2
-		if interval < time.Minute {
-			interval = time.Minute
-		}
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(RefreshInterval)
 		defer ticker.Stop()
 		if c.Stale() {
 			_, _ = c.Refresh(ctx)

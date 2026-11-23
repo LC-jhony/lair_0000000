@@ -4,6 +4,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 )
@@ -65,20 +66,74 @@ func Verify(data, sigBase64 []byte, pub ed25519.PublicKey, opts VerifyOptions) (
 	return m, nil
 }
 
-// VerifyArtifact checks that an artifact is complete and not yanked before we
-// spend bandwidth downloading it.
+// VerifyArtifact checks that an artifact and every component are complete and
+// not yanked before we spend bandwidth downloading them.
 func VerifyArtifact(a Artifact) error {
-	if a.SHA256 == "" {
-		return fmt.Errorf("artifact has no sha256")
-	}
-	if len(a.SHA256) != 64 {
-		return fmt.Errorf("artifact sha256 must be 64 hex chars, got %d", len(a.SHA256))
-	}
-	if a.URL == "" {
-		return fmt.Errorf("artifact has no url")
+	if err := verifySource(a.URL, a.SHA256); err != nil {
+		return fmt.Errorf("primary artifact: %w", err)
 	}
 	if reason, yanked := a.IsYanked(); yanked {
 		return fmt.Errorf("build %s was yanked: %s", a.Build, reason)
+	}
+	if a.Raw != "" {
+		if err := safeRelative(a.Raw); err != nil {
+			return fmt.Errorf("invalid raw destination %q: %w", a.Raw, err)
+		}
+	}
+	if err := verifyFiles(a.Files); err != nil {
+		return fmt.Errorf("primary artifact files: %w", err)
+	}
+	for i, c := range a.Components {
+		if err := verifySource(c.URL, c.SHA256); err != nil {
+			return fmt.Errorf("component %d: %w", i, err)
+		}
+		if err := verifyFiles(c.Files); err != nil {
+			return fmt.Errorf("component %d files: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func verifySource(url, sha256 string) error {
+	if url == "" {
+		return fmt.Errorf("no url")
+	}
+	if len(sha256) != 64 {
+		return fmt.Errorf("sha256 must be 64 hex chars, got %d", len(sha256))
+	}
+	for _, r := range sha256 {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return fmt.Errorf("sha256 is not hexadecimal")
+		}
+	}
+	return nil
+}
+
+func verifyFiles(files []FileMap) error {
+	for _, f := range files {
+		if err := safeRelative(f.From); err != nil {
+			return fmt.Errorf("invalid source %q: %w", f.From, err)
+		}
+		if err := safeRelative(f.To); err != nil {
+			return fmt.Errorf("invalid destination %q: %w", f.To, err)
+		}
+	}
+	return nil
+}
+
+// safeRelative rejects absolute paths and parent traversal in archive member
+// names and install destinations.
+func safeRelative(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty path")
+	}
+	n := strings.ReplaceAll(name, `\`, "/")
+	if strings.HasPrefix(n, "/") || path.IsAbs(n) {
+		return fmt.Errorf("absolute path")
+	}
+	cleaned := path.Clean(n)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return fmt.Errorf("path escapes install directory")
 	}
 	return nil
 }

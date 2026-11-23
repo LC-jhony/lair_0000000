@@ -1,0 +1,73 @@
+name: Binaries
+
+# Regenerates and signs the Lair binary catalog. The private Ed25519 key lives
+# only in the LAIR_SIGNING_KEY secret; the public half is embedded in the Go
+# binary, so trust comes from the signature and never from the hosting URL.
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  catalog:
+    name: Verify, bump and sign catalog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check artifact URLs
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          m = json.load(open('catalog/manifest.json'))
+          checked = 0
+          for pkg in ('meilisearch', 'typesense', 'rustfs'):
+              for versions in m['packages'][pkg].values():
+                  for art in versions.values():
+                      req = urllib.request.Request(art['url'], method='HEAD')
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          assert r.status < 400, art['url']
+                      assert len(art['sha256']) == 64
+                      checked += 1
+          print(f'verified {checked} artifact URLs')
+          PY
+
+      - name: Bump serial and expiry
+        run: |
+          python3 - <<'PY'
+          import json
+          from datetime import datetime, timedelta, timezone
+          for path in ('catalog/manifest.json', 'internal/assets/catalog.json'):
+              d = json.load(open(path))
+              d['serial'] = d['serial'] + 1
+              d['generated'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+              d['expires'] = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat().replace('+00:00', 'Z')
+              with open(path, 'w') as out:
+                  json.dump(d, out, indent=2, ensure_ascii=False)
+                  out.write('\n')
+          PY
+
+      - name: Sign both catalogs
+        env:
+          LAIR_SIGNING_KEY: ${{ secrets.LAIR_SIGNING_KEY }}
+        run: |
+          printf '%s' "$LAIR_SIGNING_KEY" > /tmp/lair-private.ed25519
+          go run ./cmd/catalog-sign -in catalog/manifest.json -out catalog/manifest.json.sig -key /tmp/lair-private.ed25519
+          go run ./cmd/catalog-sign -in internal/assets/catalog.json -out internal/assets/catalog.json.sig -key /tmp/lair-private.ed25519
+          rm -f /tmp/lair-private.ed25519
+
+      - name: Upload signed catalog
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            catalog/manifest.json catalog/manifest.json.sig --clobber

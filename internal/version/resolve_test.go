@@ -56,12 +56,37 @@ func TestLatestInMajor(t *testing.T) {
 }
 
 func TestExactOrLatest(t *testing.T) {
-	available := []string{"22.11.0", "22.4.0"}
+	available := []string{"22.4.0", "22.11.0", "20.19.0"}
 	if got, _ := ExactOrLatest("22.4.0", available); got != "22.4.0" {
 		t.Fatalf("exact got %s", got)
 	}
 	if got, _ := ExactOrLatest("22.9.0", available); got != "22.11.0" {
 		t.Fatalf("fallback got %s", got)
+	}
+	if got, err := ExactOrLatest("", available); err != nil || got != "22.11.0" {
+		t.Fatalf("empty got %s, %v", got, err)
+	}
+	if got, err := ExactOrLatest("latest", available); err != nil || got != "22.11.0" {
+		t.Fatalf("latest got %s, %v", got, err)
+	}
+	if got, err := ExactOrLatest("22", available); err != nil || got != "22.11.0" {
+		t.Fatalf("major got %s, %v", got, err)
+	}
+	if _, err := ExactOrLatest("", nil); err == nil {
+		t.Fatal("empty catalog accepted")
+	}
+}
+
+func TestExactOrLatestMinorLine(t *testing.T) {
+	available := []string{"11.8.9", "11.4.13", "10.11.19"}
+	if got, err := ExactOrLatest("11.4", available); err != nil || got != "11.4.13" {
+		t.Fatalf("minor line got %s, %v", got, err)
+	}
+	if got, _ := ExactOrLatest("11", available); got != "11.8.9" {
+		t.Fatalf("major got %s", got)
+	}
+	if _, err := ExactOrLatest("11.3", available); err == nil {
+		t.Fatal("missing minor line accepted")
 	}
 }
 

@@ -65,6 +65,18 @@ type Paths struct {
 func Resolve() (Paths, error) {
 	root := os.Getenv(EnvHome)
 	if root == "" {
+		switch runtime.GOOS {
+		case "windows":
+			if appData := os.Getenv("AppData"); appData != "" {
+				root = filepath.Join(appData, DataDirName)
+			}
+		case "darwin":
+			if home, err := os.UserHomeDir(); err == nil {
+				root = filepath.Join(home, "Library", "Application Support", DataDirName)
+			}
+		}
+	}
+	if root == "" {
 		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
 			root = filepath.Join(xdg, DataDirName)
 		} else {

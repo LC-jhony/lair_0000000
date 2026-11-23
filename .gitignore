@@ -10,3 +10,9 @@
 
 # Artefactos de release generados por el pipeline multiplataforma
 /dist/
+
+# Perfil de cobertura generado por `make coverage`
+coverage.out
+
+# Dependencias instaladas por npm (nunca se versionan)
+node_modules/

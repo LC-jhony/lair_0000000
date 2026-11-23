@@ -63,10 +63,81 @@ func ensureNoSymlinks(base, target string) error {
 	return nil
 }
 
-// Extract unpacks an archive into a staging directory next to dest, runs
+// FileMapping moves one regular file from an archive member to a destination
+// path inside the install directory. Both paths must be archive-root relative.
+type FileMapping struct {
+	From string
+	To   string
+}
+
+// Source is one verified archive to install. When Files is empty the archive
+// is unpacked with its original layout; otherwise only the listed members are
+// installed, at their mapped destinations.
+type Source struct {
+	Archive string
+	Files   []FileMapping
+	// Dir installs an already-extracted directory tree (used by `--from`).
+	// It is mutually exclusive with Archive and is copied verbatim, with the
+	// same symlink protection as a preserved configuration directory.
+	Dir string
+	// RawTo installs a verified single-file binary (for example a Meilisearch
+	// release) at this exact relative destination, without unpacking it.
+	RawTo string
+}
+
+// Extract installs a single archive. It is kept for callers that do not need
+// multiple sources; Install backs it.
+func Extract(archivePath, dest string, expected []string) error {
+	return Install([]Source{{Archive: archivePath}}, dest, expected)
+}
+
+// Options controls package-specific behaviour of Install. It is a functional
+// option so existing three-argument callers keep compiling unchanged.
+type Options struct {
+	// Preserve lists relative paths owned by the user (php.ini, conf.d, ...).
+	// They are copied from the old install into staging before the atomic swap,
+	// so an upgrade replaces binaries without destroying local configuration.
+	Preserve []string
+	// Verify runs against the staging tree after extraction and before the
+	// swap. A failure leaves the current installation untouched.
+	Verify func(staging string) error
+	// AfterExtract can reorganise a merged package (e.g. the Windows PHP
+	// extension pack) inside staging before verification and the swap.
+	AfterExtract func(staging string, archives []string) error
+}
+
+// Option mutates an Options value.
+type Option func(*Options)
+
+// WithPreserve asks Install to carry the listed user-owned paths over to the
+// new version during an upgrade.
+func WithPreserve(paths ...string) Option {
+	return func(o *Options) { o.Preserve = append(o.Preserve, paths...) }
+}
+
+// WithVerify registers a check that must pass before the atomic swap.
+func WithVerify(fn func(staging string) error) Option {
+	return func(o *Options) { o.Verify = fn }
+}
+
+// WithAfterExtract registers a staging-tree merge step.
+func WithAfterExtract(fn func(staging string, archives []string) error) Option {
+	return func(o *Options) { o.AfterExtract = fn }
+}
+
+// Install unpacks every source into a staging directory next to dest, runs
 // Prepare, then atomically swaps staging into dest. dest may already exist
 // (an upgrade); the old directory is removed only after the swap succeeds.
-func Extract(archivePath, dest string, expected []string) error {
+func Install(sources []Source, dest string, expected []string, opts ...Option) error {
+	if len(sources) == 0 {
+		return fmt.Errorf("no sources to install")
+	}
+	cfg := Options{}
+	for _, apply := range opts {
+		if apply != nil {
+			apply(&cfg)
+		}
+	}
 	parent := filepath.Dir(dest)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
@@ -77,14 +148,131 @@ func Extract(archivePath, dest string, expected []string) error {
 	}
 	defer os.RemoveAll(staging)
 
-	if err := extractInto(archivePath, staging); err != nil {
-		return fmt.Errorf("extract: %w", err)
+	for i, src := range sources {
+		if src.Dir != "" {
+			info, err := os.Stat(src.Dir)
+			if err != nil {
+				return fmt.Errorf("source %d directory: %w", i, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("source %d: %s is not a directory", i, src.Dir)
+			}
+			if err := copySourceDir(src.Dir, staging); err != nil {
+				return fmt.Errorf("copy source %d: %w", i, err)
+			}
+			continue
+		}
+		if src.Archive == "" {
+			return fmt.Errorf("source %d has no archive", i)
+		}
+		if src.RawTo != "" {
+			to, err := SafeJoin(staging, src.RawTo)
+			if err != nil {
+				return err
+			}
+			if err := copyRawBinary(src.Archive, to); err != nil {
+				return fmt.Errorf("install raw binary: %w", err)
+			}
+			continue
+		}
+		if len(src.Files) == 0 {
+			if err := extractInto(src.Archive, staging); err != nil {
+				return fmt.Errorf("extract %d: %w", i, err)
+			}
+			continue
+		}
+		unpack, err := os.MkdirTemp(parent, fmt.Sprintf(".lair-source-%d-", i))
+		if err != nil {
+			return err
+		}
+		if err := extractInto(src.Archive, unpack); err != nil {
+			os.RemoveAll(unpack)
+			return fmt.Errorf("extract %d: %w", i, err)
+		}
+		for _, mapping := range src.Files {
+			from, err := SafeJoin(unpack, mapping.From)
+			if err != nil {
+				os.RemoveAll(unpack)
+				return err
+			}
+			to, err := SafeJoin(staging, mapping.To)
+			if err != nil {
+				os.RemoveAll(unpack)
+				return err
+			}
+			info, err := os.Lstat(from)
+			if err != nil {
+				os.RemoveAll(unpack)
+				return fmt.Errorf("source member %s: %w", mapping.From, err)
+			}
+			if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+				os.RemoveAll(unpack)
+				return fmt.Errorf("source member %s is not a regular file", mapping.From)
+			}
+			if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+				os.RemoveAll(unpack)
+				return err
+			}
+			if err := os.Remove(to); err != nil && !os.IsNotExist(err) {
+				os.RemoveAll(unpack)
+				return err
+			}
+			if err := os.Rename(from, to); err != nil {
+				os.RemoveAll(unpack)
+				return fmt.Errorf("place %s: %w", mapping.To, err)
+			}
+		}
+		os.RemoveAll(unpack)
 	}
-	if err := stripSingleRoot(staging, expected); err != nil {
-		return fmt.Errorf("normalize layout: %w", err)
+
+	// A single archive with no explicit mapping may wrap its files in one root
+	// directory (official Node and MariaDB tarballs do). Mapped layouts are
+	// already normalized by the manifest.
+	if len(sources) == 1 && len(sources[0].Files) == 0 && sources[0].RawTo == "" && sources[0].Dir == "" {
+		if err := stripSingleRoot(staging, expected); err != nil {
+			return fmt.Errorf("normalize layout: %w", err)
+		}
 	}
 	if err := Prepare(staging, expected); err != nil {
 		return fmt.Errorf("prepare: %w", err)
+	}
+
+	if cfg.AfterExtract != nil {
+		if err := cfg.AfterExtract(staging, archives); err != nil {
+			return fmt.Errorf("merge staged package: %w", err)
+		}
+	}
+
+	// Probe the staged binaries before touching the installed version. A
+	// package that contains the wrong PHP version (or a broken FPM binary)
+	// must never become the active one.
+	if cfg.Verify != nil {
+		if err := cfg.Verify(staging); err != nil {
+			return fmt.Errorf("verify staged package: %w", err)
+		}
+	}
+
+	// Restore user-owned configuration from the previous install. This runs
+	// after verification and before the swap; on failure the old install is
+	// still intact. Paths are archive-root relative and SafeJoin-checked.
+	if len(cfg.Preserve) > 0 {
+		if _, err := os.Lstat(dest); err == nil {
+			for _, rel := range cfg.Preserve {
+				from, err := SafeJoin(dest, rel)
+				if err != nil {
+					return err
+				}
+				to, err := SafeJoin(staging, rel)
+				if err != nil {
+					return err
+				}
+				if err := copyPreserved(from, to); err != nil {
+					return fmt.Errorf("preserve %s: %w", rel, err)
+				}
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
 	}
 
 	var backup string
@@ -108,6 +296,126 @@ func Extract(archivePath, dest string, expected []string) error {
 		os.RemoveAll(backup)
 	}
 	return nil
+}
+
+// copySourceDir copies a --from directory into staging. Official Node trees
+// contain relative symlinks (bin/npm -> ../lib/...), so unlike preserved
+// configuration they are recreated after checking that the target stays
+// inside the source tree.
+func copySourceDir(from, to string) error {
+	return filepath.Walk(from, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(from, p)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(to, rel)
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			if filepath.IsAbs(target) {
+				return fmt.Errorf("refusing absolute symlink %s", p)
+			}
+			resolved := filepath.Clean(filepath.Join(filepath.Dir(p), target))
+			if inside, err := SafeJoin(from, relOf(from, resolved)); err != nil || inside != resolved {
+				return fmt.Errorf("symlink %s escapes the source tree", p)
+			}
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			return os.Symlink(target, dst)
+		}
+		if info.IsDir() {
+			return os.MkdirAll(dst, info.Mode().Perm())
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+		body, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(dst, body, info.Mode().Perm())
+	})
+}
+
+func relOf(base, target string) string {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return ".."
+	}
+	return rel
+}
+
+// copyPreserved copies a user-owned file or directory from the previous
+// install into staging. Symlinks are refused: an attacker must not be able to
+// redirect a preserved path outside the data root during an upgrade.
+func copyPreserved(from, to string) error {
+	info, err := os.Lstat(from)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to preserve symlink %s", from)
+	}
+	if info.IsDir() {
+		if err := os.MkdirAll(to, info.Mode().Perm()); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(from)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if err := copyPreserved(filepath.Join(from, entry.Name()), filepath.Join(to, entry.Name())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+	body, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(to, body, info.Mode().Perm())
+}
+
+// copyRawBinary moves a verified download into the staging tree as an
+// executable. The bytes were already checked against the signed SHA-256.
+func copyRawBinary(from, to string) error {
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(from)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(to, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 func extractInto(archivePath, dest string) error {
@@ -268,45 +576,67 @@ func stripSingleRoot(dir string, expected []string) error {
 // bytes of their target. Every target is resolved and checked to stay inside
 // the staging directory first, so this cannot be used to write outside it.
 func materializeLinks(dir string, links []pendingLink) error {
+	// Links are never materialised as links, so a link may point at another
+	// link declared later in the archive (MySQL does this for libmysqlclient).
+	// Retry unresolved entries until every chain is flattened.
+	pending := make(map[string]pendingLink, len(links))
 	for _, link := range links {
-		base := filepath.Dir(link.path)
-		if link.fromRoot {
-			base = dir
+		pending[link.path] = link
+	}
+	for len(pending) > 0 {
+		progressed := false
+		for linkPath, link := range pending {
+			base := filepath.Dir(linkPath)
+			if link.fromRoot {
+				base = dir
+			}
+			resolved := filepath.Clean(filepath.Join(base, link.target))
+			if filepath.IsAbs(link.target) {
+				return fmt.Errorf("absolute link target %q in %s", link.target, linkPath)
+			}
+			rel, err := filepath.Rel(dir, resolved)
+			if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+				return fmt.Errorf("link escapes archive: %s -> %s", linkPath, link.target)
+			}
+			// Wait until the target link has itself been replaced by a regular
+			// file with the bytes we can copy.
+			if _, waiting := pending[resolved]; waiting {
+				continue
+			}
+			info, err := os.Stat(resolved)
+			if err != nil {
+				return fmt.Errorf("link target %s: %w", link.target, err)
+			}
+			if info.IsDir() {
+				delete(pending, linkPath)
+				progressed = true
+				continue
+			}
+			data, err := os.ReadFile(resolved)
+			if err != nil {
+				return err
+			}
+			if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+				return err
+			}
+			// Copying npm/npx verbatim would break the relative require() calls in
+			// npm-cli.js/npx-cli.js. Emit a small wrapper that runs the real CLI
+			// with the bundled node binary instead. It is a regular file, so no
+			// symlink can escape the install directory.
+			if script, ok := nodeCLIWrapper(linkPath, resolved); ok {
+				data = []byte(script)
+			}
+			if err := os.WriteFile(linkPath, data, 0o755); err != nil {
+				return err
+			}
+			delete(pending, linkPath)
+			progressed = true
 		}
-		resolved := filepath.Clean(filepath.Join(base, link.target))
-		if filepath.IsAbs(link.target) {
-			return fmt.Errorf("absolute link target %q in %s", link.target, link.path)
-		}
-		rel, err := filepath.Rel(dir, resolved)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-			return fmt.Errorf("link escapes archive: %s -> %s", link.path, link.target)
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return fmt.Errorf("link target %s: %w", link.target, err)
-		}
-		if info.IsDir() {
-			continue
-		}
-		data, err := os.ReadFile(resolved)
-		if err != nil {
-			return err
-		}
-		if err := os.Remove(link.path); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(link.path), 0o755); err != nil {
-			return err
-		}
-		// Copying npm/npx verbatim would break the relative require() calls in
-		// npm-cli.js/npx-cli.js. Emit a small wrapper that runs the real CLI
-		// with the bundled node binary instead. It is a regular file, so no
-		// symlink can escape the install directory.
-		if script, ok := nodeCLIWrapper(link.path, resolved); ok {
-			data = []byte(script)
-		}
-		if err := os.WriteFile(link.path, data, 0o755); err != nil {
-			return err
+		if !progressed {
+			return fmt.Errorf("unresolved archive links: %d", len(pending))
 		}
 	}
 	return nil

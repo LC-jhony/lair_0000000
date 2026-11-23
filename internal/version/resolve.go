@@ -118,12 +118,68 @@ func LatestInMajor(request string, available []string) (string, error) {
 	return best, nil
 }
 
-// ExactOrLatest returns the exact request when it is present verbatim,
-// otherwise the newest in its major line.
+// newest returns the highest version in available, independently of its order.
+func newest(available []string) (string, error) {
+	var best string
+	var bestV Version
+	found := false
+	for _, s := range available {
+		v, err := Parse(s)
+		if err != nil {
+			continue
+		}
+		if !found || v.Compare(bestV) > 0 {
+			best, bestV, found = s, v, true
+		}
+	}
+	if !found {
+		return "", fmt.Errorf("no versions available")
+	}
+	return best, nil
+}
+
+// ExactOrLatest resolves an install request against the catalog. An empty
+// request (or "latest") selects the newest available version, so unattended
+// paths such as `lair install` and `ensure-database` work on a clean HOME.
+// A one- or two-component request resolves to the newest version in that
+// major/minor line; a full version falls back to the newest in its major line
+// when the exact patch is not published.
 func ExactOrLatest(request string, available []string) (string, error) {
+	request = strings.TrimSpace(request)
+	if request == "" || strings.EqualFold(request, "latest") {
+		return newest(available)
+	}
 	for _, s := range available {
 		if s == request {
 			return s, nil
+		}
+	}
+	parts := strings.Split(strings.TrimPrefix(request, "v"), ".")
+	if len(parts) == 1 || len(parts) == 2 {
+		req, err := Parse(request)
+		if err != nil {
+			return "", err
+		}
+		var best string
+		var bestV Version
+		found := false
+		for _, s := range available {
+			v, err := Parse(s)
+			if err != nil || v.Major != req.Major {
+				continue
+			}
+			if len(parts) == 2 && v.Minor != req.Minor {
+				continue
+			}
+			if !found || v.Compare(bestV) > 0 {
+				best, bestV, found = s, v, true
+			}
+		}
+		if found {
+			return best, nil
+		}
+		if len(parts) == 2 {
+			return "", fmt.Errorf("no version available for %s (requested %q)", req.MinorLine(), request)
 		}
 	}
 	return LatestInMajor(request, available)

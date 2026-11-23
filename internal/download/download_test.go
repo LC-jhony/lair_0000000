@@ -92,6 +92,31 @@ func TestDownloadToVerifiesAndLeavesNoResidue(t *testing.T) {
 	}
 }
 
+func TestDownloadRejectsOversizedArtifact(t *testing.T) {
+	body := []byte("this artifact is larger than the signed size")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+	d := &Downloader{BaseURLs: []string{srv.URL}}
+	if _, err := d.DownloadToProgressSized(context.Background(), "tool.tar.gz",
+		strings.Repeat("1", 64), t.TempDir(), "tool.tar.gz", 4, nil); err == nil {
+		t.Fatal("oversized artifact accepted")
+	}
+}
+
+func TestDefaultClientHasTimeouts(t *testing.T) {
+	d := &Downloader{}
+	client := d.client()
+	if client.Timeout <= 0 {
+		t.Fatal("download client has no overall timeout")
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok || tr.ResponseHeaderTimeout <= 0 {
+		t.Fatalf("download client has no response header timeout: %+v", client.Transport)
+	}
+}
+
 func TestExtractAtomicReplaceAndPrepare(t *testing.T) {
 	root := t.TempDir()
 	dest := filepath.Join(root, "php")
@@ -123,6 +148,75 @@ func TestExtractAtomicReplaceAndPrepare(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dest, "debug")); !os.IsNotExist(err) {
 		t.Fatal("debug was not trimmed")
+	}
+}
+
+func TestExtractChainedSymlinks(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	body := []byte("library bytes")
+	if err := tw.WriteHeader(&tar.Header{Name: "lib/target.so.1.2.3", Mode: 0o644, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	// Declared from shortest to longest chain on purpose.
+	for _, link := range []struct{ name, target string }{
+		{"lib/target.so", "target.so.1"},
+		{"lib/target.so.1", "target.so.1.2.3"},
+	} {
+		if err := tw.WriteHeader(&tar.Header{Name: link.name, Mode: 0o777, Linkname: link.target, Typeflag: tar.TypeSymlink}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.WriteHeader(&tar.Header{Name: "bin/tool", Mode: 0o755, Size: 2, Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write([]byte("#!")); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gz.Close()
+
+	root := t.TempDir()
+	archive := filepath.Join(root, "tool.tar.gz")
+	if err := os.WriteFile(archive, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "out")
+	if err := Extract(archive, dest, []string{"bin/tool"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "lib", "target.so"))
+	if err != nil || !bytes.Equal(got, body) {
+		t.Fatalf("chained link = %q, %v", got, err)
+	}
+}
+
+func TestInstallMappedSources(t *testing.T) {
+	root := t.TempDir()
+	cli := filepath.Join(root, "cli.tar.gz")
+	fpm := filepath.Join(root, "fpm.tar.gz")
+	if err := os.WriteFile(cli, makeTarGz(t, map[string]string{"php": "#!/bin/sh\n"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fpm, makeTarGz(t, map[string]string{"php-fpm": "#!/bin/sh\n"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "php", "8.4")
+	err := Install([]Source{
+		{Archive: cli, Files: []FileMapping{{From: "php", To: "bin/php"}}},
+		{Archive: fpm, Files: []FileMapping{{From: "php-fpm", To: "sbin/php-fpm"}}},
+	}, dest, []string{"bin/php", "sbin/php-fpm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"bin/php", "sbin/php-fpm"} {
+		if _, err := os.Stat(filepath.Join(dest, filepath.FromSlash(rel))); err != nil {
+			t.Fatalf("missing %s: %v", rel, err)
+		}
 	}
 }
 

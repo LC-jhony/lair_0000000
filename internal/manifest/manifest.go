@@ -31,6 +31,32 @@ type Artifact struct {
 	Prerelease bool              `json:"prerelease"`
 	LTS        string            `json:"lts,omitempty"` // e.g. Node's "Lithium"; empty for non-LTS builds
 	Yanked     map[string]string `json:"yanked,omitempty"`
+	// Files, when set, selects archive members and places them at exact
+	// relative destinations. It is used by builds whose layout differs from
+	// Lair's (for example static PHP, which ships "php" and "php-fpm" at the
+	// archive root instead of bin/ and sbin/). When empty the archive is
+	// installed with its original layout.
+	Files []FileMap `json:"files,omitempty"`
+	// Raw installs a verified single-file release (no archive) at this path.
+	// Meilisearch publishes its binaries directly, without a tarball.
+	Raw string `json:"raw,omitempty"`
+	// Components are additional verified archives merged into the same install
+	// directory. PHP ships CLI and FPM as separate tarballs.
+	Components []Component `json:"components,omitempty"`
+}
+
+// FileMap moves one regular file from an archive member to a destination path.
+type FileMap struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// Component is an extra archive that belongs to the same installed version.
+type Component struct {
+	URL    string    `json:"url"`
+	SHA256 string    `json:"sha256"`
+	Size   int64     `json:"size"`
+	Files  []FileMap `json:"files,omitempty"`
 }
 
 // IsYanked reports whether this artifact's build was yanked and why.
