@@ -135,9 +135,9 @@ func (s *Server) allowOrigin(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func allowedOrigin(origin string) bool {
-	if origin == "null" {
-		return true
-	}
+	// "null" is sent by sandboxed iframes and data: URLs and is trivial to
+	// forge. The Electron app now performs calls from the main process, so it
+	// sends no Origin at all; browsers must present a real loopback origin.
 	u, err := url.Parse(origin)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return false

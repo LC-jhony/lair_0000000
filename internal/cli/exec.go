@@ -31,11 +31,13 @@ func runExec(args []string, out, errOut io.Writer) error {
 	// separate runtime sets without touching the shell environment.
 	if dir, wdErr := os.Getwd(); wdErr == nil {
 		if root := pinnedRoot(dir); root != "" {
-			if abs, absErr := filepath.Abs(root); absErr == nil {
-				_ = os.Setenv(app.EnvHome, abs)
-				if resolved, rerr := app.Resolve(); rerr == nil {
-					paths = resolved
-				}
+			abs, rerr := app.ValidateProjectRoot(root)
+			if rerr != nil {
+				return fmt.Errorf("invalid root= in .lairrc: %w", rerr)
+			}
+			_ = os.Setenv(app.EnvHome, abs)
+			if resolved, rerr := app.Resolve(); rerr == nil {
+				paths = resolved
 			}
 		}
 	}
@@ -75,7 +77,9 @@ func runExec(args []string, out, errOut io.Writer) error {
 		}
 	}
 
-	env := append(append([]string(nil), inv.Env...), os.Environ()...)
+	// Go keeps the last occurrence of duplicate env keys: isolated overrides
+	// must come after the inherited environment, not before it.
+	env := append(os.Environ(), inv.Env...)
 	// argv[0] must be the resolved binary: PostgreSQL clients and the npm/npx
 	// wrappers locate their files relative to it.
 	argv := append([]string{inv.Path}, inv.Args...)

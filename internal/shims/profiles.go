@@ -62,8 +62,17 @@ func EnsureProfiles(home, binDir string) error {
 		if err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		updated := upsertBlock(string(body), profileBlock(binDir))
-		updated = upsertMarked(updated, npmProfileBlock(npmBin), MarkNpmBegin, MarkNpmEnd)
+		// Strip both managed blocks in one pass, then append them in a fixed
+		// order. Doing each block separately moves them around on the second
+		// run and breaks idempotency.
+		cleaned := removeBlock(string(body))
+		cleaned = removeMarked(cleaned, MarkNpmBegin, MarkNpmEnd)
+		cleaned = strings.TrimRight(cleaned, "\n")
+		blocks := profileBlock(binDir) + "\n" + npmProfileBlock(npmBin)
+		updated := blocks
+		if cleaned != "" {
+			updated = cleaned + "\n\n" + blocks
+		}
 		if updated != string(body) {
 			if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 				return err
@@ -154,20 +163,32 @@ func removeMarked(s, begin, end string) string {
 		if start < 0 {
 			return s
 		}
+		// Remove the blank lines that precede a managed block too, otherwise
+		// repeated EnsureProfiles calls accumulate whitespace and break
+		// idempotency.
+		from := start
+		for from > 0 {
+			c := s[from-1]
+			if c == '\n' || c == '\r' || c == ' ' || c == '\t' {
+				from--
+				continue
+			}
+			break
+		}
 		tail := strings.Index(s[start:], end)
 		if tail < 0 {
 			nl := strings.IndexByte(s[start:], '\n')
 			if nl < 0 {
-				return s[:start]
+				return s[:from]
 			}
-			s = s[:start] + s[start+nl+1:]
+			s = s[:from] + s[start+nl+1:]
 			continue
 		}
 		stop := start + tail + len(end)
 		if stop < len(s) && s[stop] == '\n' {
 			stop++
 		}
-		s = s[:start] + s[stop:]
+		s = s[:from] + s[stop:]
 	}
 }
 
@@ -177,20 +198,29 @@ func removeBlock(s string) string {
 		if start < 0 {
 			return s
 		}
+		from := start
+		for from > 0 {
+			c := s[from-1]
+			if c == '\n' || c == '\r' || c == ' ' || c == '\t' {
+				from--
+				continue
+			}
+			break
+		}
 		end := strings.Index(s[start:], MarkEnd)
 		if end < 0 {
 			// Malformed block: drop from marker to end of line.
 			nl := strings.IndexByte(s[start:], '\n')
 			if nl < 0 {
-				return s[:start]
+				return s[:from]
 			}
-			s = s[:start] + s[start+nl+1:]
+			s = s[:from] + s[start+nl+1:]
 			continue
 		}
 		stop := start + end + len(MarkEnd)
 		if stop < len(s) && s[stop] == '\n' {
 			stop++
 		}
-		s = s[:start] + s[stop:]
+		s = s[:from] + s[stop:]
 	}
 }

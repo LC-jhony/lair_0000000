@@ -99,7 +99,7 @@ export function SystemPane({ state }: PaneProps) {
               <CircleHelp className="size-3.5" aria-hidden="true" />
               {t('about.reportIssue')}
             </a>
-            <Button variant="ghost" size="sm" onClick={() => setUninstallOpen(true)}>
+            <Button variant="danger" size="sm" onClick={() => setUninstallOpen(true)}>
               <Trash2 className="size-3.5" aria-hidden="true" />
               {t('uninstall.action')}
             </Button>
@@ -191,7 +191,12 @@ export function SystemPane({ state }: PaneProps) {
         <pre className="max-h-[55vh] overflow-auto rounded-lg bg-muted/40 p-4 text-xs leading-relaxed">{log?.text || t('dash.noLog')}</pre>
       </Dialog>
 
-      <UninstallSheet open={uninstallOpen} onClose={() => setUninstallOpen(false)} home={state.status?.home} />
+      <UninstallSheet
+        open={uninstallOpen}
+        onClose={() => setUninstallOpen(false)}
+        home={state.status?.home}
+        onUninstall={(deleteData) => void state.act(t('uninstall.title'), (c) => c.uninstall(deleteData))}
+      />
     </div>
   );
 }

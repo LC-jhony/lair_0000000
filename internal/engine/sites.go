@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/lair-sh/lair/internal/app"
 	"github.com/lair-sh/lair/internal/config"
 	"github.com/lair-sh/lair/internal/pki"
 	"github.com/lair-sh/lair/internal/shims"
@@ -144,6 +145,13 @@ func (e *Engine) Pin(tool, value, projectDir string) error {
 	if tool != "php" && tool != "node" && tool != "root" {
 		return fmt.Errorf("pin accepts only php, node or root")
 	}
+	if tool == "root" {
+		validated, err := app.ValidateProjectRoot(value)
+		if err != nil {
+			return fmt.Errorf("pin root: %w", err)
+		}
+		value = validated
+	}
 	path := filepath.Join(projectDir, ".lairrc")
 	body, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -207,7 +215,11 @@ func (e *Engine) PinnedRoot(projectDir string) string {
 		for _, line := range strings.Split(string(body), "\n") {
 			line = strings.TrimSpace(line)
 			if strings.HasPrefix(line, "root=") {
-				return strings.TrimSpace(strings.TrimPrefix(line, "root="))
+				root, err := app.ValidateProjectRoot(strings.TrimSpace(strings.TrimPrefix(line, "root=")))
+				if err != nil {
+					return ""
+				}
+				return root
 			}
 		}
 	}
@@ -281,6 +293,8 @@ func (e *Engine) Uninstall(_, _ string, deleteData bool) error {
 	}
 	dataDir := e.Paths.Root
 	e.Supervisors.StopAll()
+	e.FPM.StopAll()
+	e.CGI.StopAll()
 
 	if deleteData {
 		return os.RemoveAll(dataDir)

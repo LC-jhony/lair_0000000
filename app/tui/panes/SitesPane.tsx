@@ -60,7 +60,7 @@ export function SitesPane({ state }: TerminalPaneProps) {
         ))}
       </Section>
       {prompt.active ? <PromptLine label={mode === 'new' ? t('project.name') : t('dash.siteName')} value={prompt.value} /> : null}
-      <Hint text="↑/↓: select · p: park · l: link · n: new project · u: unlink · s: secure · o: open · e: HTTPS · v: detail · f: vhost" />
+      <Hint text="↑/↓: select · p: park · l: link · n: new project · u: unlink · s: secure · o: open · e: enable/disable · v: detail · f: vhost" />
     </Box>
   );
 }

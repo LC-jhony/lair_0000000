@@ -6,12 +6,12 @@ export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'dan
 export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon';
 
 const variants: Record<ButtonVariant, string> = {
-  primary: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90',
-  secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-  outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
-  ghost: 'hover:bg-accent hover:text-accent-foreground',
-  danger: 'bg-destructive text-white shadow-sm hover:bg-destructive/90',
-  subtle: 'bg-primary/10 text-primary hover:bg-primary/15',
+  primary: 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 dark:text-white',
+  secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80 dark:text-white',
+  outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground dark:text-white',
+  ghost: 'hover:bg-accent hover:text-accent-foreground dark:text-white',
+  danger: 'bg-destructive text-white shadow-sm hover:bg-destructive/90 dark:text-white',
+  subtle: 'bg-primary/10 text-primary hover:bg-primary/15 dark:text-white',
 };
 
 const sizes: Record<ButtonSize, string> = {

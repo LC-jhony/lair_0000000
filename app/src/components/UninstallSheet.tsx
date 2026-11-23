@@ -11,10 +11,11 @@ export interface UninstallSheetProps {
   open: boolean;
   onClose: () => void;
   home?: string;
+  onUninstall?: (deleteData: boolean) => void;
 }
 
 /** Guidance sheet for removing Lair. The destructive step is always a CLI command. */
-export function UninstallSheet({ open, onClose, home }: UninstallSheetProps) {
+export function UninstallSheet({ open, onClose, home, onUninstall }: UninstallSheetProps) {
   const t = useT();
   const [deleteData, setDeleteData] = useState(false);
 
@@ -25,7 +26,17 @@ export function UninstallSheet({ open, onClose, home }: UninstallSheetProps) {
       title={t('uninstall.title')}
       description={t('uninstall.description')}
       size="md"
-      footer={<Button variant="outline" onClick={onClose}>{t('common.close')}</Button>}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>{t('common.close')}</Button>
+          {onUninstall && (
+            <Button variant="danger" onClick={() => { onUninstall(deleteData); onClose(); }}>
+              <Trash2 className="size-3.5" aria-hidden="true" />
+              {t('uninstall.action')}
+            </Button>
+          )}
+        </>
+      }
     >
       <div className="flex flex-col gap-4">
         <div className="rounded-lg border border-border bg-muted/30 p-4">

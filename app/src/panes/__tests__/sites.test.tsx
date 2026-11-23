@@ -56,15 +56,11 @@ describe('pestaña Sites', () => {
     await waitFor(() => expect(secure).toHaveBeenCalledWith('blog.test', false));
   });
 
-  it('guarda PHP, Node y la base de datos desde la configuración del sitio', async () => {
+  it('no expone el diálogo de configuración redundante', async () => {
     const daemon = new FakeDaemon({ fixture: demoFixture });
-    const isolate = vi.spyOn(daemon, 'isolate');
-    const setDB = vi.spyOn(daemon, 'projectSetDB');
     renderPane(<SitesPane state={controller(daemon)} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Configure site' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(setDB).toHaveBeenCalledWith('blog.test', 'mariadb'));
-    expect(isolate).toHaveBeenCalledWith('php', '8.4', '/home/jhony/lair/blog');
+    expect(screen.queryByRole('button', { name: 'Configure site' })).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Details' })).toBeTruthy();
   });
 });
 

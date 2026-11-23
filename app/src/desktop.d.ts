@@ -6,8 +6,10 @@ declare global {
     lairDesktop?: {
       platform: string;
       electronVersion: string;
-      /** Reads run/desktop.url and run/desktop.token in the main process. */
-      connect: () => Promise<{ url: string; token: string } | null>;
+      /** Checks that the daemon published its connection details. */
+      connect: () => Promise<{ url: string } | null>;
+      /** Invokes a daemon action in main; the token never reaches the renderer. */
+      call?: (action: string, payload: unknown) => Promise<unknown>;
       /** Runs `lair doctor --fix` from the main process after an install. */
       repairShims?: () => Promise<string>;
     };

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -108,6 +109,40 @@ func Resolve() (Paths, error) {
 		CacheBin:   filepath.Join(root, DirCache, DirCacheBin),
 		ConfigFile: filepath.Join(root, DirConfig),
 	}, nil
+}
+
+// ValidateProjectRoot checks a `root=` override read from a project's
+// .lairrc. The value is untrusted, version-controlled input: it must be an
+// absolute path inside the current user's home, and an existing path must not
+// resolve outside it through symlinks. Paths.Ensure() creates directories and
+// chmods them, so accepting arbitrary paths would be a privilege hazard.
+func ValidateProjectRoot(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", fmt.Errorf("empty root")
+	}
+	abs, err := filepath.Abs(trimmed)
+	if err != nil || !filepath.IsAbs(abs) {
+		return "", fmt.Errorf("root must be an absolute path")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	within := func(base, target string) bool {
+		rel, err := filepath.Rel(base, target)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+	}
+	if !within(home, abs) {
+		return "", fmt.Errorf("root %s is outside the user's home", abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		resolvedHome, homeErr := filepath.EvalSymlinks(home)
+		if homeErr == nil && !within(resolvedHome, resolved) {
+			return "", fmt.Errorf("root %s escapes the user's home through a symlink", abs)
+		}
+	}
+	return abs, nil
 }
 
 // Ensure creates the layout with correct permissions. Run/ is 0700 because it

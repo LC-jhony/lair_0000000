@@ -25,11 +25,55 @@ function connection() {
   const runDir = path.join(lairHome(), 'run');
   const url = readTrimmed(path.join(runDir, 'desktop.url'));
   const token = readTrimmed(path.join(runDir, 'desktop.token'));
+  // The token is read here only to check that the daemon published it. It is
+  // never returned to the renderer: all API calls go through lair:call below.
   if (!url || !token) return null;
-  return { url, token };
+  return { url };
 }
 
-ipcMain.handle('lair:connect', () => connection());
+function appPageUrl() {
+  return pathToFileURL(path.join(__dirname, '..', 'dist-app', 'index.html')).href;
+}
+
+/** Only the app's own frame may use the privileged IPC handlers. */
+function isAppFrame(event) {
+  const frameUrl = event.senderFrame && event.senderFrame.url;
+  if (!frameUrl) return false;
+  const devURL = process.env.VITE_DEV_SERVER_URL;
+  if (devURL) {
+    try {
+      return new URL(frameUrl).origin === new URL(devURL).origin;
+    } catch {
+      return false;
+    }
+  }
+  return frameUrl === appPageUrl();
+}
+
+ipcMain.handle('lair:connect', (event) => {
+  if (!isAppFrame(event)) throw new Error('unauthorized frame');
+  return connection();
+});
+
+/** Performs the daemon call in the main process so the token stays there. */
+ipcMain.handle('lair:call', async (event, action, payload) => {
+  if (!isAppFrame(event)) throw new Error('unauthorized frame');
+  const details = connection();
+  if (!details) throw new Error('daemon is not available');
+  const runDir = path.join(lairHome(), 'run');
+  const token = readTrimmed(path.join(runDir, 'desktop.token'));
+  const response = await fetch(`${details.url.replace(/\/+$/, '')}/api`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Lair-Token': token },
+    body: JSON.stringify({ action, payload: payload ?? {} }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.ok === false) {
+    throw new Error(body.error || `daemon responded ${response.status}`);
+  }
+  return body.data ?? {};
+});
 
 const isMac = process.platform === 'darwin';
 const isWindows = process.platform === 'win32';
@@ -123,7 +167,8 @@ function lairBinary() {
 // Runs the same repair path as `lair doctor --fix`. The desktop uses it after
 // an install so node/npm shims exist even when the running daemon predates the
 // ensure-shims action.
-ipcMain.handle('lair:repair-shims', () => {
+ipcMain.handle('lair:repair-shims', (event) => {
+  if (!isAppFrame(event)) throw new Error('unauthorized frame');
   // Throws (rejecting the renderer's invoke) when LAIR_BIN is misconfigured,
   // so no arbitrary path is ever passed to execFile.
   const binary = lairBinary();

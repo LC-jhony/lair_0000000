@@ -172,7 +172,7 @@ func TestCORS(t *testing.T) {
 	s := newTestServer(t)
 	handler := s.Handler()
 
-	for _, origin := range []string{"null", "http://localhost:5173", "http://127.0.0.1:5173"} {
+	for _, origin := range []string{"http://localhost:5173", "http://127.0.0.1:5173"} {
 		req := httptest.NewRequest(http.MethodOptions, "/api", nil)
 		req.Header.Set("Origin", origin)
 		req.Header.Set("Access-Control-Request-Method", "POST")
@@ -183,6 +183,17 @@ func TestCORS(t *testing.T) {
 		}
 		if got := w.Header().Get("Access-Control-Allow-Origin"); got != origin {
 			t.Errorf("preflight %s ACAO = %q", origin, got)
+		}
+	}
+
+	// "null" is forgeable by sandboxed frames and must be rejected too.
+	for _, origin := range []string{"null", "https://evil.example"} {
+		req := httptest.NewRequest(http.MethodOptions, "/api", nil)
+		req.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("preflight %s = %d, want 403", origin, w.Code)
 		}
 	}
 
