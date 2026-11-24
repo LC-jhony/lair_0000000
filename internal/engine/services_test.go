@@ -1,10 +1,34 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lair-sh/lair/internal/config"
 )
+
+func TestDatabaseServiceIDFallsBackToMariaDB(t *testing.T) {
+	e := newTestEngine(t)
+	if got := e.databaseServiceID("mariadb"); got != "mariadb" {
+		t.Fatalf("mariadb = %q", got)
+	}
+	if got := e.databaseServiceID("mysql"); got != "" {
+		t.Fatalf("mysql without any engine = %q, want empty", got)
+	}
+	if err := os.MkdirAll(filepath.Join(e.Paths.Services, "mariadb", "11.8.9-buildN1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.databaseServiceID("mysql"); got != "mariadb" {
+		t.Fatalf("mysql with MariaDB installed = %q, want mariadb", got)
+	}
+	if err := os.MkdirAll(filepath.Join(e.Paths.Services, "mysql", "8.4.13-buildN1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.databaseServiceID("mysql"); got != "mysql" {
+		t.Fatalf("mysql with MySQL installed = %q, want mysql", got)
+	}
+}
 
 func TestChooseInstallPortAvoidsOtherService(t *testing.T) {
 	e := newTestEngine(t)

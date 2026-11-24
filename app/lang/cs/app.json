@@ -309,7 +309,7 @@
   "project.waitingLog": "Čekání na výstup instalátoru…",
   "project.invalidName": "Použijte malá písmena, číslice a pomlčky (max. 63).",
   "project.invalidParent": "Vyberte existující nadřazenou složku.",
-  "project.invalidDatabase": "Zadejte platný název databáze.",
+  "project.invalidDatabase": "Neplatný název databáze: začněte písmenem nebo podtržítkem a použijte jen písmena, číslice a podtržítka (bez pomlček).",
   "project.invalidCredentials": "Zadejte uživatele databáze (heslo může být prázdné).",
   "web.securing": "Vystavuji certifikát pro {{name}}…",
   "project.invalidPort": "Zadejte port mezi 1 a 65535.",

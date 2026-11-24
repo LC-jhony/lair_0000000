@@ -74,18 +74,18 @@ Para ver las capacidades reales de la máquina antes de crear nada:
 
 ## Instalación
 
-### Binarios del release v1.0.2
+### Binarios del release v1.0.3
 
-Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.2>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario. El paquete `.deb` de Linux incluye además la **app de escritorio Electron** y el comando `lair-desktop`; el icono *Lair* del menú la abre directamente. Los comprimidos `.tar.gz`/`.zip` solo contienen el binario CLI.
+Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.3>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario. El paquete `.deb` de Linux incluye además la **app de escritorio Electron** y el comando `lair-desktop`; el icono *Lair* del menú la abre directamente. Los comprimidos `.tar.gz`/`.zip` solo contienen el binario CLI.
 
 #### Linux x86_64 (amd64)
 
 ```sh
 mkdir -p ~/.local/bin && cd /tmp
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/lair_1.0.2_linux_amd64.tar.gz
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/SHA256SUMS
-grep ' lair_1.0.2_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
-tar -xzf lair_1.0.2_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.3/lair_1.0.3_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.3/SHA256SUMS
+grep ' lair_1.0.3_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
+tar -xzf lair_1.0.3_linux_amd64.tar.gz
 install -m 0755 lair ~/.local/bin/lair
 lair --help
 ```
@@ -93,8 +93,8 @@ lair --help
 En **Linux arm64**, sustituye `amd64` por `arm64` en el nombre del artefacto. En Debian/Ubuntu instala el `.deb` (incluye la app de escritorio):
 
 ```sh
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/lair_1.0.2_amd64.deb
-sudo apt install ./lair_1.0.2_amd64.deb      # usa arm64 en Raspberry Pi
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.3/lair_1.0.3_amd64.deb
+sudo apt install ./lair_1.0.3_amd64.deb      # usa arm64 en Raspberry Pi
 lair-desktop                                 # abre la app de escritorio
 ```
 
@@ -102,20 +102,20 @@ lair-desktop                                 # abre la app de escritorio
 
 ```sh
 mkdir -p ~/.local/bin && cd /tmp
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/lair_1.0.2_darwin_arm64.tar.gz
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/SHA256SUMS
-grep ' lair_1.0.2_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
-tar -xzf lair_1.0.2_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.3/lair_1.0.3_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.3/SHA256SUMS
+grep ' lair_1.0.3_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
+tar -xzf lair_1.0.3_darwin_arm64.tar.gz
 install -m 0755 lair ~/.local/bin/lair
 ```
 
-Para Intel, usa `lair_1.0.2_darwin_amd64.tar.gz`.
+Para Intel, usa `lair_1.0.3_darwin_amd64.tar.gz`.
 
 #### Windows (PowerShell)
 
 ```powershell
-$asset = 'lair_1.0.2_windows_amd64.zip'
-$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.2'
+$asset = 'lair_1.0.3_windows_amd64.zip'
+$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.3'
 Invoke-WebRequest -Uri "$base/$asset" -OutFile $asset
 Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile SHA256SUMS
 $expected = (Select-String -Path SHA256SUMS -Pattern " $asset`$").Line.Split(' ')[0]
@@ -127,7 +127,7 @@ Move-Item lair.exe $dir -Force
 [Environment]::SetEnvironmentVariable('Path', "$env:Path;$dir", 'User')
 ```
 
-Para ARM64 usa `lair_1.0.2_windows_arm64.zip`.
+Para ARM64 usa `lair_1.0.3_windows_arm64.zip`.
 
 ### Desde el código fuente
 
@@ -1026,7 +1026,7 @@ lair doctor                              # diagnóstico general
 | Certificado no confiable | Falta confianza en navegador. | `"$LAIR_HOME/trust-ca-user.sh" --add` y reinicia el navegador. |
 | `no catalog loaded` | Sin caché y sin red. | `lair update` con red; lo ya instalado sigue funcionando offline. |
 | `all mirrors failed` / `HTTP 404` al actualizar | Mirror caído o `LAIR_MANIFEST_BASE_URLS` apuntando a una URL inexistente. | Revisa esa variable; por defecto se usa `raw.githubusercontent.com/LC-jhony/lair/main/catalog`. El catálogo firmado embebido sigue funcionando. |
-| `Application already exists!` al crear un proyecto | Versión antigua que creaba el archivo SQLite antes de `laravel new`. | Actualiza a v1.0.2 o posterior; el archivo se crea ahora después del instalador. |
+| `Application already exists!` al crear un proyecto | Versión antigua que creaba el archivo SQLite antes de `laravel new`. | Actualiza a v1.0.3 o posterior; el archivo se crea ahora después del instalador. |
 | `mysql` aparece en la app pero no se instala | No hay build firmado de MySQL. | Usa `mariadb`; `mysql` sigue siendo un driver PDO válido para Laravel. |
 | Conflicto `port 6379 is already assigned to redis` al instalar Valkey | Redis y Valkey comparten el puerto por defecto. | El asistente sugiere el siguiente libre; en CLI usa `lair services install valkey --port 6380`. |
 | `lair new` pide contraseña con MariaDB local | El root local de Lair no tiene contraseña. | Deja la contraseña vacía; para PostgreSQL el usuario es `postgres`. |
@@ -1225,6 +1225,7 @@ Las imágenes se generaron con la app React en modo `?fake=1` (datos de ejemplo,
 - [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — changelog general (la entrada `v1.0.0` y notas históricas por fases).
 - [`RELEASE_NOTES_1.0.1.md`](RELEASE_NOTES_1.0.1.md) — corrección del lanzador `.deb`.
 - [`RELEASE_NOTES_1.0.2.md`](RELEASE_NOTES_1.0.2.md) — correcciones de creación de proyectos, catálogo y servicios.
+- [`RELEASE_NOTES_1.0.3.md`](RELEASE_NOTES_1.0.3.md) — driver `mysql` sobre MariaDB y mensaje de validación de BD.
 - [`docs/CLI.md`](docs/CLI.md) — referencia completa de comandos y variables de entorno.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — interfaces y flujos internos.
 - [`docs/PHASES.md`](docs/PHASES.md) — estado de las fases 1–6 (todas implementadas) y decisiones por fase.
@@ -1246,11 +1247,11 @@ make test && (cd app && npm test && npm run typecheck)
 # 2. notas específicas: RELEASE_NOTES_<VERSION>.md (si no existe se usa RELEASE_NOTES.md)
 
 # 3. construir los 8 artefactos (6 comprimidos + 2 .deb) y SHA256SUMS
-scripts/build-dist.sh 1.0.2
+scripts/build-dist.sh 1.0.3
 
 # 4. crear el tag sobre el commit final y publicar (requiere gh autenticado)
-git tag -a v1.0.2 -m "Lair v1.0.2"
-scripts/create-release.sh 1.0.2      # no recrea el tag: créalo antes
+git tag -a v1.0.3 -m "Lair v1.0.3"
+scripts/create-release.sh 1.0.3      # no recrea el tag: créalo antes
 ```
 
 `scripts/create-release.sh` verifica los hashes, sube `main` y el tag y publica

@@ -647,6 +647,20 @@ func copyTree(from, to string) error {
 	})
 }
 
+// databaseServiceID maps a Laravel database driver to the supervised service
+// that owns it. MySQL has no signed build in Lair's catalog, so the `mysql`
+// PDO driver falls back to an installed MariaDB service (same protocol).
+func (e *Engine) databaseServiceID(driver string) string {
+	id := project.ServiceID(driver)
+	if id != "mysql" || len(e.installedServiceVersions("mysql")) > 0 {
+		return id
+	}
+	if len(e.installedServiceVersions("mariadb")) == 0 {
+		return "" // let ServiceSpec report that no engine is available
+	}
+	return "mariadb"
+}
+
 // createProject runs the ordered stages. A failed creation removes the folder
 // it may have created, so a retry never finds a half-built project.
 func (e *Engine) createProject(ctx context.Context, req project.CreateRequest, target, site string, log func(string)) (err error) {
@@ -669,9 +683,20 @@ func (e *Engine) createProject(ctx context.Context, req project.CreateRequest, t
 		return err
 	}
 
+	serviceID := e.databaseServiceID(req.Database)
+	if req.Database == "mysql" && serviceID == "mariadb" {
+		log("MySQL no tiene build en Lair: se usa MariaDB para el driver mysql.")
+		// Keep the Laravel default port in sync with the installed service.
+		if c, err := e.Config.View(); err == nil {
+			if port := c.Ports["mariadb"]; port > 0 && req.DBPort == 3306 {
+				req.DBPort = port
+			}
+		}
+	}
+
 	if req.Database != "sqlite" && req.CreateDB {
 		log("Preparando la base de datos…")
-		if serviceID := project.ServiceID(req.Database); serviceID != "" {
+		if serviceID != "" {
 			if req.StartService {
 				log("Arrancando " + serviceID + " si está parado…")
 				if err := e.ensureServiceRunning(ctx, serviceID); err != nil {
