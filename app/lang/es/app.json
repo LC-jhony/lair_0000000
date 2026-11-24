@@ -310,7 +310,7 @@
   "project.invalidName": "Usa letras minúsculas, números y guiones (máx. 63).",
   "project.invalidParent": "Elige una carpeta padre existente.",
   "project.invalidDatabase": "Introduce un nombre de base de datos válido.",
-  "project.invalidCredentials": "Introduce el usuario y la contraseña de la BD.",
+  "project.invalidCredentials": "Introduce el usuario de la BD (la contraseña puede quedar vacía).",
   "web.securing": "Emitiendo certificado para {{name}}…",
   "project.invalidPort": "Introduce un puerto entre 1 y 65535.",
   "project.failed": "No se pudo crear el proyecto.",

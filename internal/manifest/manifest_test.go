@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,6 +29,43 @@ func TestNewCatalogRejectsEmptyBaseURLs(t *testing.T) {
 			PublicKey: pub, Channel: "stable", BaseURLs: bases, Root: t.TempDir(),
 		}); err == nil {
 			t.Errorf("empty base URL accepted: %q", bases)
+		}
+	}
+}
+
+func TestDefaultBaseURLsArePublished(t *testing.T) {
+	if len(DefaultBaseURLs) == 0 {
+		t.Fatal("no default mirrors configured")
+	}
+	for _, base := range DefaultBaseURLs {
+		for _, dead := range []string{"lair-sh", "lair-builds.github.io", "cdn.lair.sh"} {
+			if strings.Contains(base, dead) {
+				t.Errorf("stale mirror %q still configured", base)
+			}
+		}
+	}
+}
+
+func TestFetchReportsEveryMirrorFailure(t *testing.T) {
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer a.Close()
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer b.Close()
+	c := &Catalog{
+		cfg:  CatalogConfig{BaseURLs: []string{a.URL, b.URL}, Channel: "stable"},
+		http: &http.Client{}, maxAge: time.Hour, now: time.Now,
+	}
+	_, err := c.fetch(context.Background(), "manifest.json")
+	if err == nil {
+		t.Fatal("expected fetch failure")
+	}
+	for _, want := range []string{a.URL, b.URL, "HTTP 404", "HTTP 500"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not report %q", err, want)
 		}
 	}
 }

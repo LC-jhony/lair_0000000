@@ -23,13 +23,13 @@ La CLI detecta automáticamente el daemon: si `run/api.sock` responde y `run/api
 | `lair job retry <id>` | Reintenta un job fallido con el mismo artefacto verificado. |
 | Configuración de Lair (botón en Sitios) | Configura HTTPS, puertos, enlace y dominio del servidor Go que sirve `*.test` mediante la acción `web` del daemon; también muestra PHP/Node por defecto, carpetas de proyectos y estado de DNS/CA. Por defecto HTTP **80** y HTTPS **443**; para evitar `CAP_NET_BIND_SERVICE`/`setcap`, usa 8080/8443. |
 | `lair project sync` | Vuelve a escanear las carpetas de proyectos y registra los sitios detectados. |
-| `lair project migrate-dirs` (alias `lair migrate-dirs`) | Migra `~/lair` a `~/Lair` (mueve los proyectos y registra sus sitios como aparcados). Se ejecuta también automáticamente al arrancar si detecta la carpeta antigua. |
-| `lair project import-valet` (alias `lair import-valet`) | Importa en **solo lectura** `~/.valet/config.json` y `~/.valet/Sites`: registra rutas y dominios como sitios aparcados, sin modificar esos archivos ni instalar/ejecutar Valet. |
+| `lair project migrate-dirs` (alias `lair migrate-dirs`) | Migra `~/lair` a `~/Lair` (mueve los proyectos y actualiza las rutas). No es automático: el arranque solo sincroniza las carpetas ya configuradas. |
+| `lair project import-valet` (alias `lair import-valet`) | Importa en **solo lectura** `~/.valet/config.json` y `~/.valet/Sites`: añade las rutas a `project_dirs` y adopta el dominio; no modifica esos archivos ni instala/ejecuta Valet. Los sitios aparecen tras `lair project sync`. |
 | `lair project info` | Muestra capacidades para crear proyectos: instalador Laravel, PHP, Composer, Node (nvm), drivers PDO, gestores Node, motores de BD y carpeta de proyectos. |
 | `lair project dir [path]` | Muestra o fija la carpeta de proyectos por defecto. Por defecto `~/Lair` (**L mayúscula**); se rechaza cualquier ruta dentro de `$LAIR_HOME`. Atajo de `lair project dirs default`. |
 | `lair project dirs [list\|add <path>\|remove <path>\|default <path>]` | Gestiona **ProjectDirs**: lista, añade, quita o fija la carpeta por defecto donde se escanean proyectos. |
-| `lair migrate-dirs` | Migra `~/lair` a `~/Lair` (mueve los proyectos y registra sus sitios como aparcados). Se ejecuta también automáticamente al arrancar si detecta la carpeta antigua. |
-| `lair import-valet` | Importa en **solo lectura** `~/.valet/config.json` y `~/.valet/Sites`: registra rutas y dominios como sitios aparcados, sin modificar esos archivos ni instalar/ejecutar Valet. |
+| `lair migrate-dirs` | Migra `~/lair` a `~/Lair` de forma explícita; no se ejecuta automáticamente al arrancar. |
+| `lair import-valet` | Importa en **solo lectura** la configuración de Valet (`project_dirs` + dominio), sin instalar ni ejecutar Valet. |
 | `lair new <name> [options]` | Comando oficial para crear un proyecto Laravel; alias directo de `lair project new`. Sin `--parent` usa `~/Lair`. |
 | `lair project new\|create <name> [options]` | Alias de compatibilidad de `lair new`. Crea un proyecto Laravel, prepara la BD, parchea `.env` y registra `<name>.test`. Sin `--parent` usa la carpeta configurada, nunca el directorio actual. Opciones: `--parent`, `--secure`, `--stack`, `--no-auth`, `--testing`, `--boost`, `--node-manager`, `--git`, `--database`, `--db-name`, `--db-user`, `--db-password`, `--db-host`, `--db-port`, `--no-create-db`, `--no-start`. La contraseña se pide sin eco si no se pasa (o `LAIR_DB_PASSWORD`). |
 | `lair services [list]` (alias `lair service`) | Lista servicios, versión activa, puerto y estado. Válido también para el resto de subcomandos: `lair service install ...`, `lair service default ...`, etc. |
@@ -56,18 +56,16 @@ La CLI detecta automáticamente el daemon: si `run/api.sock` responde y `run/api
 
 ## ProjectDirs, migración e importación de Valet
 
-El estado persistente incluye un bloque **`project_dirs`** (tipo **`ProjectDirs`**) con la carpeta por defecto y la lista de carpetas que se escanean. **`DefaultProjectsDir` es `~/Lair`** (con L mayúscula), fuera de `$LAIR_HOME`:
+El estado persistente incluye **`project_dirs`**, un **array** de carpetas escaneadas (la primera es la por defecto) y `projects_dir`, su vista derivada. **`DefaultProjectsDir` es `~/Lair`** (con L mayúscula), fuera de `$LAIR_HOME`:
 
 ```json
-"project_dirs": {
-  "default": "/home/usuario/Lair",
-  "dirs": ["/home/usuario/Lair"]
-}
+"project_dirs": ["/home/usuario/Lair", "/srv/otros-proyectos"],
+"projects_dir": "/home/usuario/Lair"
 ```
 
 - Si `~/Lair` no existe, Lair la crea y la registra como aparcada; sus proyectos aparecen en **Sites** como `<nombre>.test`. La página Sites no cambia.
-- Si existe `~/lair`, Lair migra los proyectos automáticamente al arrancar; `lair migrate-dirs` lo hace de forma explícita. La carpeta antigua no se borra sin confirmación.
-- `lair import-valet` lee `~/.valet/config.json` y `~/.valet/Sites` **en solo lectura**: añade sitios aparcados con sus rutas y dominios, sin escribir en esos archivos ni instalar/ejecutar Valet. Valet nunca se ejecuta como root.
+- Si existe `~/lair`, usa `lair migrate-dirs` de forma explícita para mover los proyectos; el arranque del daemon solo sincroniza las carpetas configuradas. La carpeta antigua no se borra sin confirmación.
+- `lair import-valet` lee `~/.valet/config.json` y `~/.valet/Sites` **en solo lectura**: añade esas rutas a `project_dirs` y adopta el dominio, sin escribir en esos archivos ni instalar/ejecutar Valet. Valet nunca se ejecuta como root; los sitios se registran tras `lair project sync`.
 
 Estas operaciones son valores del campo `op` de la acción `project` del daemon (el inventario compartido tiene 49 acciones):
 
@@ -195,7 +193,7 @@ La fuente autoritativa del contrato es `SiteRequest` / `SiteResult` en `internal
 
 No se sirve ninguna SPA. El daemon publica `POST /api` en `127.0.0.1:9797` (configurable con `--desktop-port N`) para la app Electron + React de `app/`.
 
-- Autenticación: cabecera `X-Lair-Token` (comparación en tiempo constante). Sin token responde `401`; los tokens en query ya no se aceptan. Solo se permiten orígenes `null` (file:// de Electron), `localhost`, `127.0.0.1` y `::1`.
+- Autenticación: cabecera `X-Lair-Token` (comparación en tiempo constante). Sin token responde `401`; los tokens en query ya no se aceptan. Solo se permiten orígenes HTTP(S) de `localhost`, `127.0.0.1` y `::1`; el origen `null` se rechaza. Electron llama desde el proceso principal, sin cabecera `Origin`.
 - Superficie: el `Dispatcher` registra **49 acciones**; el cliente desktop declara 43, verificadas por `scripts/check-actions.mjs`. Incluye `status`, `versions`, `update`, `bootstrap`, `first-run`, `ensure-shims`, `install-*`, `job`/`jobs`/`job-cancel`/`job-retry`, `logs`/`logs-list` (con `sources`), `php-use`/`php-uninstall`, `node-default`/`node-update`/`node-uninstall`, `composer-update`, `ext-*`, `npm-update`, `isolated`/`unpin`/`unisolate`, `service-*`, `create-db`/`db-default`/`ensure-database`, `park`/`link`/`unlink`/`secure`/`web`/`project`/`pin`/`isolate`/`site`, `mail`/`dumps`/`debugger` y `uninstall`. Fuera del cliente quedan `shutdown` y alguna acción interna de CLI/daemon. La app no calcula estados: adopta lo que devuelve el daemon.
 - Archivos: `run/desktop.token` y `run/desktop.url`, ambos `0600` dentro de `run/` (`0700`). Se eliminan al apagar el daemon.
 - `window.lairDesktop.connect()` (IPC de Electron, `contextIsolation`) entrega la URL y el token al renderer sin exponer filesystem.
@@ -217,7 +215,7 @@ Variables de entorno relevantes:
 
 - `LAIR_HOME`: override del directorio de datos.
 - `XDG_DATA_HOME`: base alternativa (`$XDG_DATA_HOME/lair`).
-- `LAIR_MANIFEST_BASE_URLS`: lista de mirrors separada por comas. El primero, por defecto, es `https://raw.githubusercontent.com/lair-sh/lair/main/catalog`; el binario trae además un catálogo firmado embebido con Node LTS `v26.13.1` y MariaDB `11.4.7` (ejemplo de desarrollo, **no un feed de producción**).
+- `LAIR_MANIFEST_BASE_URLS`: lista de mirrors separada por comas. El primero, por defecto, es `https://raw.githubusercontent.com/LC-jhony/lair/main/catalog`; el binario trae además un catálogo firmado embebido con Node LTS `v26.13.1` y MariaDB `11.4.7` (ejemplo de desarrollo, **no un feed de producción**).
 - `LAIR_COMPOSER_DOWNLOAD_URL` / `LAIR_COMPOSER_CHECKSUM_URL`: URLs alternativas para `composer.phar` y su checksum (el SHA-256 se sigue verificando).
 
 ## Shims y PATH

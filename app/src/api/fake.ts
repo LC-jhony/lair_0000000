@@ -710,6 +710,7 @@ export class FakeDaemon implements DaemonClient {
       pdo_drivers: ['sqlite', 'mysql', 'pgsql'],
       node_managers: ['npm'],
       databases: ['sqlite', 'mysql', 'mariadb', 'pgsql'],
+      default_database: 'mariadb',
       projects_dir: this.projectDirsState[0] ?? DEFAULT_PROJECT_DIR,
       hint: '',
     };

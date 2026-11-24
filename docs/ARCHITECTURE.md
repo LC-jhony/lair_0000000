@@ -40,7 +40,7 @@ internal/
 | `manifest` | `Catalog` | `Refresh`, `LoadFromCache`, `Start`, `Subscribe` (hook `OnChange`) |
 | `installer` | `Manager`, `Job`, `Request` | `Start(ctx, Request)`, `Status`, `Cancel`, `OnSuccess` |
 | `config` | `Store` | `Update(fn)`, `View()` con escritura atómica |
-| `config` | `ProjectDirs` | `Default` y `Dirs` en `config.json`; `DefaultProjectsDir(home)` = `~/Lair` (se crea y se aparca si falta) |
+| `config` | `Config.ProjectDirs`, `Config.ProjectsDir` | `project_dirs` (array) y su vista `projects_dir` en `config.json`; `DefaultProjectsDir(home)` = `~/Lair` (se crea y se aparca si falta) |
 | `services` | `Spec` | Contrato puro del proceso: `Executable`, `Args`, `Env`, `DataDir`, `ClientTools` |
 | `supervisor` | `Runner`, `Process`, `Supervisor` | `Start`, `Wait`, `Signal`, `Run`, `Update`, `State` |
 | `platform` | `PrivilegedPlan` | `BuildPlan(cfg)`, `Script()`, `InstallTrust(ca)`; instala dnsmasq en `127.0.0.1:53535`, drop-in de resolved con `Domains=~test`, `CAP_NET_BIND_SERVICE`/`setcap` para 80/443 y backup/rollback |
@@ -80,13 +80,11 @@ El router web Go (`internal/web/router.go`) construye los hosts virtuales a part
 
 ## ProjectDirs, importación de Valet y DNS
 
-`config.json` incorpora **`project_dirs`** (tipo **`ProjectDirs`**): `default` y `dirs`. `DefaultProjectsDir` devuelve **`~/Lair`** (L mayúscula), siempre fuera de `$LAIR_HOME`. En el arranque, `SyncProjectDirs` crea `~/Lair` si falta, registra como aparcados los proyectos que encuentre (`artisan` o `composer.json`) y migra `~/lair` cuando existe.
+`config.json` incorpora **`project_dirs`** (array de rutas; la primera es la por defecto) y `projects_dir` (vista derivada). `DefaultProjectsDir` devuelve **`~/Lair`** (L mayúscula), siempre fuera de `$LAIR_HOME`. En el arranque, `SyncProjectDirs` crea `~/Lair` si falta y registra como aparcados los proyectos que encuentre (`artisan` o `composer.json`); la migración de `~/lair` requiere `lair migrate-dirs`.
 
 ```json
-"project_dirs": {
-  "default": "/home/usuario/Lair",
-  "dirs": ["/home/usuario/Lair"]
-}
+"project_dirs": ["/home/usuario/Lair", "/srv/otros-proyectos"],
+"projects_dir": "/home/usuario/Lair"
 ```
 
 - `migrate-dirs` (`project` con `op: migrate-dirs`; CLI `lair migrate-dirs`): mueve los proyectos de `~/lair` a `~/Lair`, conserva los archivos y actualiza los sitios registrados; la carpeta antigua no se borra sin confirmación.

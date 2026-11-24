@@ -33,7 +33,7 @@ lair doctor                     # diagnóstico si algo no responde
 
 ## Índice
 
-0. [Instalación](#instalación)
+- [Instalación](#instalación)
 1. [Compilación y Makefile](#1-compilación-y-makefile)
 2. [Configuración](#2-configuración)
 3. [El comando `lair`](#3-el-comando-lair)
@@ -50,20 +50,42 @@ lair doctor                     # diagnóstico si algo no responde
 
 ---
 
+## De la app de escritorio a la terminal
+
+Si ya usas la app, estas son las equivalencias en CLI. Todas pasan por el mismo
+daemon y el mismo contrato `project` / `site` / `service`:
+
+| En la app | En la terminal |
+|---|---|
+| Sitios → New project | `lair new <nombre>` |
+| Runtimes → instalar PHP / Node | `lair php install 8.4` / `lair node install` |
+| Bases de datos → crear BD | `lair services create-db mariadb <nombre>` |
+| Servicios → interruptor | `lair services restart <id>` / `lair services stop <id>` |
+| Configuración de Lair | `lair daemon --foreground --http-port 8080 --https-port 8443` (o el diálogo de la app) |
+| Correo / Dumps / Depurador | `lair mail status` / `lair dumps capture-on` / `lair debugger status` |
+| Logs | `lair logs [nombre]` |
+| Sitios → refrescar proyectos | `lair project sync` |
+| Menú → Lair | `lair ui` (o `lair-desktop` en el paquete `.deb`) |
+
+Para ver las capacidades reales de la máquina antes de crear nada:
+`lair project info`.
+
+---
+
 ## Instalación
 
-### Binarios del release v1.0.1
+### Binarios del release v1.0.2
 
-Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.1>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario. El paquete `.deb` de Linux incluye además la **app de escritorio Electron** y el comando `lair-desktop`; el icono *Lair* del menú la abre directamente. Los comprimidos `.tar.gz`/`.zip` solo contienen el binario CLI.
+Los paquetes publicados están en <https://github.com/LC-jhony/lair/releases/tag/v1.0.2>. Cada comprimido contiene `lair` (o `lair.exe` en Windows) y este README. **Verifica siempre el SHA-256** contra el fichero `SHA256SUMS` del release antes de ejecutar el binario. El paquete `.deb` de Linux incluye además la **app de escritorio Electron** y el comando `lair-desktop`; el icono *Lair* del menú la abre directamente. Los comprimidos `.tar.gz`/`.zip` solo contienen el binario CLI.
 
 #### Linux x86_64 (amd64)
 
 ```sh
 mkdir -p ~/.local/bin && cd /tmp
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/lair_1.0.1_linux_amd64.tar.gz
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/SHA256SUMS
-grep ' lair_1.0.1_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
-tar -xzf lair_1.0.1_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/lair_1.0.2_linux_amd64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/SHA256SUMS
+grep ' lair_1.0.2_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
+tar -xzf lair_1.0.2_linux_amd64.tar.gz
 install -m 0755 lair ~/.local/bin/lair
 lair --help
 ```
@@ -71,8 +93,8 @@ lair --help
 En **Linux arm64**, sustituye `amd64` por `arm64` en el nombre del artefacto. En Debian/Ubuntu instala el `.deb` (incluye la app de escritorio):
 
 ```sh
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/lair_1.0.1_amd64.deb
-sudo apt install ./lair_1.0.1_amd64.deb      # usa arm64 en Raspberry Pi
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/lair_1.0.2_amd64.deb
+sudo apt install ./lair_1.0.2_amd64.deb      # usa arm64 en Raspberry Pi
 lair-desktop                                 # abre la app de escritorio
 ```
 
@@ -80,20 +102,20 @@ lair-desktop                                 # abre la app de escritorio
 
 ```sh
 mkdir -p ~/.local/bin && cd /tmp
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/lair_1.0.1_darwin_arm64.tar.gz
-curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.1/SHA256SUMS
-grep ' lair_1.0.1_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
-tar -xzf lair_1.0.1_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/lair_1.0.2_darwin_arm64.tar.gz
+curl -fLO https://github.com/LC-jhony/lair/releases/download/v1.0.2/SHA256SUMS
+grep ' lair_1.0.2_darwin_arm64.tar.gz$' SHA256SUMS | shasum -a 256 -c
+tar -xzf lair_1.0.2_darwin_arm64.tar.gz
 install -m 0755 lair ~/.local/bin/lair
 ```
 
-Para Intel, usa `lair_1.0.1_darwin_amd64.tar.gz`.
+Para Intel, usa `lair_1.0.2_darwin_amd64.tar.gz`.
 
 #### Windows (PowerShell)
 
 ```powershell
-$asset = 'lair_1.0.1_windows_amd64.zip'
-$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.1'
+$asset = 'lair_1.0.2_windows_amd64.zip'
+$base  = 'https://github.com/LC-jhony/lair/releases/download/v1.0.2'
 Invoke-WebRequest -Uri "$base/$asset" -OutFile $asset
 Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile SHA256SUMS
 $expected = (Select-String -Path SHA256SUMS -Pattern " $asset`$").Line.Split(' ')[0]
@@ -105,7 +127,7 @@ Move-Item lair.exe $dir -Force
 [Environment]::SetEnvironmentVariable('Path', "$env:Path;$dir", 'User')
 ```
 
-Para ARM64 usa `lair_1.0.1_windows_arm64.zip`.
+Para ARM64 usa `lair_1.0.2_windows_arm64.zip`.
 
 ### Desde el código fuente
 
@@ -264,10 +286,8 @@ lair doctor    # imprime home, bin, PATH y shims
     "postgres": "17.2"
   },
   "ports": { "postgres": 5432 },
-  "project_dirs": {
-    "default": "/home/usuario/Lair",
-    "dirs": ["/home/usuario/Lair"]
-  },
+  "project_dirs": ["/home/usuario/Lair", "/srv/otros-proyectos"],
+  "projects_dir": "/home/usuario/Lair",
   "sites": {
     "mi-app.test": {
       "path": "/home/usuario/Lair/mi-app",
@@ -283,7 +303,8 @@ lair doctor    # imprime home, bin, PATH y shims
 | `installed` | `"<paquete>/<versión>" → build` instalado. | `lair php/node/services install` |
 | `defaults` | Versión activa de `php`, `node` y cada servicio. | `lair php use`, `lair node default`, `lair services use` |
 | `ports` | Puerto asignado a cada servicio (uno activo por puerto). | `lair services install --port N` |
-| `project_dirs` | **ProjectDirs**: carpeta por defecto (`~/Lair`) y lista de carpetas que se escanean en busca de proyectos. | `lair project dirs`, `lair migrate-dirs`, `lair import-valet` |
+| `project_dirs` | **Array** de carpetas que se escanean en busca de proyectos. La primera es la carpeta por defecto (`~/Lair`) y se refleja en `projects_dir` por compatibilidad. | `lair project dirs`, `lair project dir`, `lair migrate-dirs`, `lair import-valet` |
+| `projects_dir` | Vista derivada de `project_dirs[0]`; no se edita directamente. | `lair project dir` |
 | `sites` | Sitios aparcados y sus versiones aisladas. | `lair park`, `lair link`, `lair isolate` |
 
 `config.json` no se edita a mano: usa los comandos para que el daemon mantenga el estado coherente.
@@ -314,7 +335,7 @@ También se respetan `.nvmrc` y `.node-version` para Node (en ese orden, despué
 |---|---|
 | `LAIR_HOME` | Raíz de datos (ver 2.1). |
 | `XDG_DATA_HOME` | Base alternativa (`$XDG_DATA_HOME/lair`). |
-| `LAIR_MANIFEST_BASE_URLS` | Mirrors del catálogo firmado separados por comas; se prueban en orden. Por defecto incluye `https://raw.githubusercontent.com/lair-sh/lair/main/catalog`. La confianza es de la firma, no del host. |
+| `LAIR_MANIFEST_BASE_URLS` | Mirrors del catálogo firmado separados por comas; se prueban en orden. Por defecto incluye `https://raw.githubusercontent.com/LC-jhony/lair/main/catalog`. La confianza es de la firma, no del host. |
 | `LAIR_COMPOSER_DOWNLOAD_URL` | URL alternativa de `composer.phar` (se sigue verificando el SHA-256). |
 | `LAIR_COMPOSER_CHECKSUM_URL` | URL alternativa del `.sha256` de Composer (solo si no hay checksum en el catálogo). |
 | `LAIR_COMPOSER_SHA256` | SHA-256 alternativo para `composer.phar` en pruebas/espejos. |
@@ -322,7 +343,7 @@ También se respetan `.nvmrc` y `.node-version` para Node (en ese orden, despué
 Las dos últimas son útiles en entornos cerrados o con mirror interno:
 
 ```sh
-export LAIR_MANIFEST_BASE_URLS="https://cdn.lair.sh/stable,https://mirror.interno/lair/stable"
+export LAIR_MANIFEST_BASE_URLS="https://raw.githubusercontent.com/LC-jhony/lair/main/catalog,https://mirror.interno/lair/stable"
 export LAIR_COMPOSER_DOWNLOAD_URL="https://mirror.interno/composer.phar"
 export LAIR_COMPOSER_CHECKSUM_URL="https://mirror.interno/composer.phar.sha256"
 lair update && lair install
@@ -370,7 +391,7 @@ sudo systemctl enable --now lair@$USER
 
 ### 2.7 Catálogo firmado de ejemplo
 
-Lair no consulta un índice editable: consume un **manifiesto firmado con Ed25519**. El binario lleva una copia embebida (`internal/assets/catalog.json` + `.sig`) y el repositorio publica la misma pareja en `catalog/`; por eso una instalación nueva funciona aunque `cdn.lair.sh` o `lair-builds.github.io` estén caídos. Un manifiesto del mirror con serial mayor sustituye al embebido; uno más antiguo se ignora.
+Lair no consulta un índice editable: consume un **manifiesto firmado con Ed25519**. El binario lleva una copia embebida (`internal/assets/catalog.json` + `.sig`) y el repositorio publica la misma pareja en `catalog/`; por eso una instalación nueva funciona aunque el mirror esté caído. Un manifiesto del mirror con serial mayor sustituye al embebido; uno más antiguo se ignora.
 
 > **Este catálogo es un ejemplo de desarrollo, no un feed de producción.** La clave pública está en `keys/public.ed25519` y la privada (`keys/private.ed25519`, `0600`) está excluida de Git. Para producción hay que generar un par nuevo, publicar solo la pública en el binario y firmar los manifiestos con la privada en un entorno controlado.
 
@@ -494,14 +515,14 @@ Forma general: `lair services <acción> <id> [versión] [flags]`.
 | `update` | `lair services update postgres` | Instala la última, activa y reinicia. |
 | `uninstall` | `lair services uninstall postgres 17.2 --delete-data` | Elimina la instalación; sin `--delete-data` conserva los datos. |
 | `create-db` | `lair services create-db postgres laravel` | Crea una base de datos. |
-| `default` | `lair services default sqlite\|mariadb\|mysql\|postgres` | Elige la BD predeterminada de nuevos proyectos (SQLite por defecto). |
+| `default` | `lair services default sqlite\|mariadb\|postgres` | Elige la BD predeterminada de nuevos proyectos (SQLite por defecto). `mysql` es un driver PDO válido, pero no tiene build firmado: usa `mariadb`. |
 | `restart` / `stop` | `lair services restart postgres` | Controla el supervisor. |
 
-IDs disponibles: `postgres`, `mysql`, `mariadb`, `mongodb`, `redis`, `valkey`, `meilisearch`, `typesense`, `rustfs`.
+IDs con spec: `postgres`, `mariadb`, `mongodb`, `redis`, `valkey`, `meilisearch`, `typesense`, `rustfs` (más `sqlite3`, que es un CLI y no un proceso). `mysql` existe como spec heredada y como driver PDO de Laravel, pero **el catálogo no publica build de MySQL**: usa `mariadb` como motor compatible. Por eso la pestaña Servicios no muestra la tarjeta `mysql`.
 
 Los servicios de búsqueda y almacenamiento usan los puertos 7700 (Meilisearch), 8108 (Typesense) y 9000 con consola en 9001 (RustFS). Sus credenciales son fijas y **solo para desarrollo**: `TYPESENSE_API_KEY=lair` y `rustfsadmin`/`rustfsadmin`. Typesense no tiene build para Windows y aparece como no disponible allí. PostgreSQL usa siempre el puerto 5432: no se elige al instalar ni se cambia después.
 
-El catálogo firmado publica compilaciones para `mariadb`, `postgres`, `mongodb`, `valkey` 9.2.0 y `redis` 7.4.6 en Linux x64/arm64. Valkey y Redis comparten el puerto 6379: instala el segundo con `--port 6380`. La interfaz muestra todas las tarjetas y marca las que no tienen compilación para la plataforma actual («Not available on …»), en lugar de ocultarlas sin explicación.
+El catálogo firmado publica compilaciones para `mariadb`, `postgres`, `mongodb`, `valkey` 9.2.0 y `redis` 7.4.6 en Linux x64/arm64. Valkey y Redis comparten el puerto 6379: si ya hay un servicio en él, el asistente sugiere el siguiente puerto libre y el daemon lo elige automáticamente cuando no se pasa `--port`; para forzar uno, usa `--port 6380`. La interfaz muestra todas las tarjetas disponibles y marca las que no tienen compilación para la plataforma actual («Not available on …»), en lugar de ocultarlas sin explicación.
 
 SQLite no es un servicio supervisable: es una base de datos por archivo. Lair crea `database/database.sqlite` dentro de cada proyecto (opción `sqlite` en `lair new`) y la pestaña Services muestra una tarjeta informativa; no hay proceso ni puerto que iniciar. El CLI `sqlite3` 3.54.1 sí se instala desde el catálogo (`lair services install sqlite3`) y queda disponible como shim (`lair exec sqlite3 --version`). El catálogo publica el CLI para Linux x64 y macOS/Windows x64+arm64; Linux arm64 requiere compilarlo, así que aparece como no disponible en esa plataforma.
 
@@ -527,17 +548,37 @@ Lair puede crear un proyecto Laravel completo con una sola acción del daemon
 | `lair project info` | Muestra instalador Laravel, versiones de PHP/Composer/Node, drivers PDO, gestores Node, motores de BD disponibles y la carpeta de proyectos. |
 | `lair project dir [ruta]` | Muestra o fija la carpeta por defecto donde se crean los proyectos. Por defecto `~/Lair` (**L mayúscula**); nunca se usa el directorio actual ni `$LAIR_HOME`. Es un atajo de `lair project dirs default`. |
 | `lair project dirs [list\|add <ruta>\|remove <ruta>\|default <ruta>]` | Gestiona **ProjectDirs**: lista, añade, quita o fija la carpeta por defecto. Las rutas deben ser absolutas y estar fuera de `$LAIR_HOME`. |
-| `lair migrate-dirs` | Migra la carpeta anterior `~/lair` a `~/Lair`: mueve los proyectos y registra sus sitios como aparcados. También se ejecuta automáticamente al arrancar si detecta `~/lair`. |
-| `lair import-valet` | Importa, **en solo lectura**, `~/.valet/config.json` y `~/.valet/Sites`: registra como sitios aparcados las rutas y dominios que allí aparecen, sin modificar esos archivos ni instalar o ejecutar Valet. |
+| `lair migrate-dirs` | Migra la carpeta anterior `~/lair` a `~/Lair`: mueve los proyectos y actualiza las rutas registradas. No se ejecuta automáticamente; el arranque solo sincroniza las carpetas ya configuradas (`lair project sync`). |
+| `lair import-valet` | Lee, **en solo lectura**, `~/.valet/config.json` y `~/.valet/Sites`: añade esas rutas a `project_dirs` y adopta el dominio, sin modificar esos archivos ni instalar o ejecutar Valet. No crea sitios aparcados por sí mismo; aparecerán tras `lair project sync`. |
 | `lair new <nombre> [opciones]` | **Comando oficial** para crear un proyecto Laravel. Prepara la BD, escribe `.env` y registra `<nombre>.test`. Sin `--parent`, usa `~/Lair`. |
 | `lair project new <nombre> [opciones]` | Alias de `lair new`, mantenido por compatibilidad. |
 
-Cualquier proyecto que aparezca en la carpeta configurada (`~/Lair` por defecto) se detecta automáticamente: la pestaña **Sites** lo muestra como `<nombre>.test` aunque se haya creado con `laravel new` directamente. Se reconocen las carpetas que contengan `artisan` o `composer.json`; los sitios enlazados explícitamente no se sobrescriben. |
+Cualquier proyecto que aparezca en la carpeta configurada (`~/Lair` por defecto) se detecta automáticamente: la pestaña **Sites** lo muestra como `<nombre>.test` aunque se haya creado con `laravel new` directamente. Se reconocen las carpetas que contengan `artisan` o `composer.json`; los sitios enlazados explícitamente no se sobrescriben.
 
 ```sh
-lair project new blog --stack=livewire --database=mariadb --db-name=blog_dev --secure
+lair project info                       # comprueba instalador, PHP, Composer, PDO, BD y carpeta
+lair new blog --stack=livewire --database=mariadb --db-name=blog_dev --secure
 # La contraseña se pide sin eco; también puede pasar en LAIR_DB_PASSWORD.
+# MariaDB/MySQL locales: usuario root, contraseña VACÍA es válida.
+# PostgreSQL: usuario postgres por defecto. Sin --parent se usa ~/Lair.
 ```
+
+**No hace falta instalar `laravel/installer` con Composer global.** La primera vez
+que creas un proyecto, Lair instala `laravel/installer` en su propio
+`COMPOSER_HOME` aislado (`$LAIR_HOME/tools/laravel-global`) y ejecuta
+`composer global require laravel/installer` dentro de ese entorno. Tu Composer
+global y tu `$PATH` quedan intactos. Si ya tienes un `laravel` global, Lair no
+lo usa: para apuntar a otro instalador existe `LAIR_LARAVEL_BIN`.
+
+Detalles que evitan errores habituales:
+
+- El archivo SQLite se crea **después** de `laravel new` (si se creara antes, el
+  instalador rechazaría la carpeta con `Application already exists!`).
+- La carpeta de proyectos por defecto es `~/Lair`; nunca el directorio actual
+  ni `$LAIR_HOME`.
+- El puerto de BD del asistente se toma del servicio instalado: si tienes
+  MariaDB en 3307, `lair new` conecta a 3307, no a 3306.
+- `Secure` activa **HTTPS del sitio** (`*.test`), no TLS de la base de datos.
 
 El asistente de la desktop (**Sites → New project**) y la TUI (`C` en Sitios)
 ofrecen las mismas opciones: nombre, carpeta padre (campo de texto), HTTPS,
@@ -565,8 +606,8 @@ caso Lair avisa y solo escribe las credenciales en `.env`.
 ```
 
 - **`DefaultProjectsDir` es `~/Lair`** (con L mayúscula), siempre fuera de `$LAIR_HOME`. Si la carpeta no existe, Lair la crea y la registra como aparcada: sus proyectos aparecen en **Sites** como `<nombre>.test` sin que cambie la página.
-- Si existe la carpeta anterior `~/lair`, Lair migra automáticamente los proyectos a `~/Lair` y reemplaza sus registros; `lair migrate-dirs` fuerza la migración cuando se necesita. El contenido se conserva y la carpeta antigua no se borra sin confirmación.
-- `lair import-valet` lee `~/.valet/config.json` y `~/.valet/Sites` **solo para leer**: añade los sitios aparcados con sus rutas y dominios, sin escribir en esos archivos, sin instalar Valet y sin ejecutarlo como root.
+- Si existe la carpeta anterior `~/lair`, usa `lair migrate-dirs` para mover los proyectos a `~/Lair` y actualizar los registros. El contenido se conserva y la carpeta antigua no se borra sin confirmación. El arranque del daemon solo llama a `SyncProjectDirs`; no migra `~/lair` por su cuenta.
+- `lair import-valet` lee `~/.valet/config.json` y `~/.valet/Sites` **solo para leer**: añade sus rutas a `project_dirs` y toma el dominio de Valet, sin escribir en esos archivos, sin instalar Valet y sin ejecutarlo como root. Para ver los proyectos como sitios, ejecuta `lair project sync` después.
 - Las mismas operaciones están en el daemon dentro de la acción `project`, campo `op`: `dirs-list`, `dirs-add`, `dirs-remove`, `dirs-default`, `migrate-dirs` e `import-valet`. En la TUI se agrupan bajo la tecla **`F`**. La acción `site` y el detalle de **Sites** no cambian.
 
 ### 3.6 Sitios y HTTPS
@@ -672,7 +713,7 @@ lair desktop
 ```
 
 - El bridge publica `POST /api` con `{action, payload}` y cabecera `X-Lair-Token`. No sirve HTML, CSS ni JS; solo llama al mismo `Dispatcher` que usa la CLI.
-- El token se escribe en `$LAIR_HOME/run/desktop.token` (`0600`) y la URL base en `$LAIR_HOME/run/desktop.url` (`0600`). El token nunca viaja en la URL: se rechaza el fallback por query y se acepta solo desde orígenes locales/Electron (`null`, `localhost`, `127.0.0.1`).
+- El token se escribe en `$LAIR_HOME/run/desktop.token` (`0600`) y la URL base en `$LAIR_HOME/run/desktop.url` (`0600`). El token nunca viaja en la URL: se rechaza el fallback por query y se acepta solo desde orígenes HTTP(S) locales (`localhost`, `127.0.0.1`, `::1`); el origen `null` se rechaza. Electron llama desde el proceso principal, sin cabecera `Origin`, y esas peticiones se permiten.
 - El proceso principal de Electron lee esos archivos y expone `window.lairDesktop.connect()` al renderer con `contextIsolation`; el renderer no tiene acceso a filesystem.
 - La app adopta el estado que devuelve el daemon, usa jobs con polling y no instala nada por sí misma. Cada texto visible es una clave de `app/lang/<código>/app.json` (en, es, cs).
 - El bridge se desactiva con `lair daemon --foreground --no-desktop` y su puerto se cambia con `--desktop-port N`.
@@ -960,7 +1001,7 @@ lair doctor                              # diagnóstico general
 - `lair import-valet` lee `~/.valet/config.json` y `~/.valet/Sites` **en solo lectura**; Lair no instala, modifica ni ejecuta Valet, y nunca lo ejecuta como root.
 - Para enlazar 80/443 sin root se usa `CAP_NET_BIND_SERVICE` en la unidad o `setcap` sobre el binario; también puedes volver a 8080/8443 si no quieres conceder esa capacidad.
 - Descarga a `.part` + SHA-256 en streaming + `safeJoin`; builds *yanked* rechazados y reemplazados automáticamente.
-- `run/` es `0700`; los tokens de la API y del bridge de la app nativa son `0600` y se comparan en tiempo constante. El token del bridge viaja en la cabecera **`X-Lair-Token`**, nunca en la URL (ni en query ni en fragmento); se rechazan los fallbacks por query y solo se aceptan orígenes locales/Electron.
+- `run/` es `0700`; los tokens de la API y del bridge de la app nativa son `0600` y se comparan en tiempo constante. El token del bridge viaja en la cabecera **`X-Lair-Token`**, nunca en la URL (ni en query ni en fragmento); se rechazan los fallbacks por query y solo se aceptan orígenes HTTP(S) locales (`localhost`, `127.0.0.1`, `::1`); el origen `null` se rechaza.
 - El agente de dumps usa un **token dedicado** en `run/dumps.token` (`0600`), distinto del token de la API. El SMTP catcher escucha solo en `127.0.0.1:2525`; la captura de dumps se puede desactivar (`capture-off`), Xdebug se activa solo bajo demanda y las operaciones `clear` piden confirmación. Detalle en [`docs/SECURITY.md`](docs/SECURITY.md).
 - El detalle de sitio **enmascara las variables de entorno** (los secretos llegan con `value` vacío y `secret: true`) y los secretos **nunca aparecen en `status`** ni en los payloads de la acción `site`: `env-set` solo informa del nombre de la clave. El borrado de la carpeta de un sitio requiere `delete_files: true` **y confirmación en la interfaz** (TUI `X`); `unlink` sigue siendo no destructivo. El motor además rechaza rutas relativas, dentro de `LAIR_HOME` o enlaces simbólicos. Los hosts virtuales se generan en memoria desde `config.json`, sin archivos de configuración externos. Detalle en [`docs/SECURITY.md`](docs/SECURITY.md).
 - El host virtual generado solo contiene rutas, sockets, certificados, dominios/alias y puertos: **ningún secreto ni valor del `.env`**. Desactivar un sitio retira su host virtual del router, y la página de estado `not-configured.html` (cuando `root_state != ok`) solo muestra el host y la ruta esperada del front controller **dentro del proyecto**: no expone rutas de `LAIR_HOME`, tokens ni variables de entorno. No se escribe en `/etc`, así que no se amplía la superficie del sistema. Detalle en [`docs/SECURITY.md`](docs/SECURITY.md).
@@ -984,6 +1025,11 @@ lair doctor                              # diagnóstico general
 | Quieres importar un Valet existente | Hay un `~/.valet/config.json` / `~/.valet/Sites`. | `lair import-valet` (solo lectura; no instala ni ejecuta Valet). |
 | Certificado no confiable | Falta confianza en navegador. | `"$LAIR_HOME/trust-ca-user.sh" --add` y reinicia el navegador. |
 | `no catalog loaded` | Sin caché y sin red. | `lair update` con red; lo ya instalado sigue funcionando offline. |
+| `all mirrors failed` / `HTTP 404` al actualizar | Mirror caído o `LAIR_MANIFEST_BASE_URLS` apuntando a una URL inexistente. | Revisa esa variable; por defecto se usa `raw.githubusercontent.com/LC-jhony/lair/main/catalog`. El catálogo firmado embebido sigue funcionando. |
+| `Application already exists!` al crear un proyecto | Versión antigua que creaba el archivo SQLite antes de `laravel new`. | Actualiza a v1.0.2 o posterior; el archivo se crea ahora después del instalador. |
+| `mysql` aparece en la app pero no se instala | No hay build firmado de MySQL. | Usa `mariadb`; `mysql` sigue siendo un driver PDO válido para Laravel. |
+| Conflicto `port 6379 is already assigned to redis` al instalar Valkey | Redis y Valkey comparten el puerto por defecto. | El asistente sugiere el siguiente libre; en CLI usa `lair services install valkey --port 6380`. |
+| `lair new` pide contraseña con MariaDB local | El root local de Lair no tiene contraseña. | Deja la contraseña vacía; para PostgreSQL el usuario es `postgres`. |
 | `make test-race` falla | Falta `gcc`/cgo. | Usa `make test`. |
 
 ---
@@ -1016,7 +1062,7 @@ Archivos: `cli.go` contiene `usage()` y el despacho; `commands.go` la mayoría d
 
 El binario lleva `catalog.json` y su firma Ed25519 incrustados con `go:embed`; el repositorio publica la misma pareja en `catalog/`. `manifest` verifica la firme sobre **los bytes exactos del JSON** antes de parsearlo, gestiona el serial, la caché (6 h), los canales (`stable`, `beta`, `experimental` vía `LAIR_CHANNEL`) y las marcas LTS. Un mirror con serial mayor sustituye al embebido; uno más antiguo o caducado se ignora. La confianza es de la firma, no del host: `LAIR_MANIFEST_BASE_URLS` solo cambia de dónde se descarga.
 
-**Verificar:** `./lair update` y `./lair versions` (o `lair status`, que muestra las versiones disponibles). Para volver a firmar tras editar el catálogo, el comando está en [§2.7](#27-catálogo-firmado-de-ejemplo).
+**Verificar:** `./lair update` y `./lair status` (muestra las versiones disponibles; no existe `lair versions`). Para volver a firmar tras editar el catálogo, el comando está en [§2.7](#27-catálogo-firmado-de-ejemplo).
 
 ### 11.4 `internal/download` + `internal/installer` — descargas y jobs
 
@@ -1024,7 +1070,7 @@ Toda instalación es un **job**: la descarga va a un fichero `.part`, se calcula
 
 El progreso se muestra donde tiene sentido: barra en la CLI solo cuando hay TTY (para no romper salidas capturadas), barra global en la desktop bajo la cabecera y barra en el footer de la TUI Go.
 
-**Verificar:** `lair php install 8.4` en una terminal, `lair job <id>`, `lair job retry <id>`, `lair logs <id>-install`.
+**Verificar:** `lair php install 8.4` en una terminal, `lair status` (estado de jobs), `lair job retry <id>`, `lair logs <id>-install`.
 
 ### 11.5 `internal/config` — estado atómico
 
@@ -1136,7 +1182,7 @@ Es la capa compartida. `FirstRun()` instala PHP, Node LTS, el CLI `sqlite3` y Co
 | CLI / CLI offline | `./lair help`, `./lair status --json` |
 | Paths | `LAIR_HOME=/tmp/x ./lair doctor` |
 | Catálogo | `./lair update` |
-| Installer / jobs | `./lair php install 8.4`, `./lair job <id>` |
+| Installer / jobs | `./lair php install 8.4`, `./lair status`, `./lair job retry <id>` |
 | Config | `./lair services default sqlite` |
 | PHP / extensiones | `./lair php list`, `./lair ext` |
 | Composer | `./lair composer version` |
@@ -1176,7 +1222,9 @@ Las imágenes se generaron con la app React en modo `?fake=1` (datos de ejemplo,
 
 ## 13. Más documentación
 
-- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — changelog detallado de la versión `v1.0.0`.
+- [`RELEASE_NOTES.md`](RELEASE_NOTES.md) — changelog general (la entrada `v1.0.0` y notas históricas por fases).
+- [`RELEASE_NOTES_1.0.1.md`](RELEASE_NOTES_1.0.1.md) — corrección del lanzador `.deb`.
+- [`RELEASE_NOTES_1.0.2.md`](RELEASE_NOTES_1.0.2.md) — correcciones de creación de proyectos, catálogo y servicios.
 - [`docs/CLI.md`](docs/CLI.md) — referencia completa de comandos y variables de entorno.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — interfaces y flujos internos.
 - [`docs/PHASES.md`](docs/PHASES.md) — estado de las fases 1–6 (todas implementadas) y decisiones por fase.
@@ -1185,5 +1233,31 @@ Las imágenes se generaron con la app React en modo `?fake=1` (datos de ejemplo,
 - [`docs/node.md`](docs/node.md) — instalación de Node por mayor y prefijos globales de npm.
 - [`docs/project-versions.md`](docs/project-versions.md) — pin/aislamiento y resolución de versiones por proyecto.
 - [`docs/adr/`](docs/adr/) — decisiones de arquitectura (catálogo firmado, CA local, bridge desktop, servidor Go integrado, acción `project`, uninstall/validación de rutas, panes de soporte en desktop/TUI, detalle de sitio en pestañas, hosts virtuales del servidor Go, [servidor Go como único web layer](docs/adr/010-servidor-go-como-unico-web-layer.md) y [carpeta `~/Lair` y DNS dnsmasq seguro con fallback](docs/adr/011-carpeta-lair-y-dns-dnsmasq-seguro-con-fallback.md)).
+
+### Publicar una versión
+
+Los releases se generan con los scripts del repositorio; el binario no lleva
+constante de versión ni flag `--version` (la versión la fija el tag):
+
+```sh
+# 1. comprobar que todo pasa
+make test && (cd app && npm test && npm run typecheck)
+
+# 2. notas específicas: RELEASE_NOTES_<VERSION>.md (si no existe se usa RELEASE_NOTES.md)
+
+# 3. construir los 8 artefactos (6 comprimidos + 2 .deb) y SHA256SUMS
+scripts/build-dist.sh 1.0.2
+
+# 4. crear el tag sobre el commit final y publicar (requiere gh autenticado)
+git tag -a v1.0.2 -m "Lair v1.0.2"
+scripts/create-release.sh 1.0.2      # no recrea el tag: créalo antes
+```
+
+`scripts/create-release.sh` verifica los hashes, sube `main` y el tag y publica
+9 assets (SHA256SUMS + 8 artefactos). Necesita `gh` con `gh auth login` o
+`GITHUB_TOKEN` con permiso `contents: write`. El workflow
+`.github/workflows/binaries.yml` se dispara al publicar el release y vuelve a
+firmar el catálogo con el secreto `LAIR_SIGNING_KEY`; el catálogo embebido en el
+binario del tag no se modifica.
 
 Logos: `assets/logo-dark.svg` (contenedor negro, L roja degradada) y `assets/logo-light.svg` (contenedor blanco, L negra), con copias embebidas en `internal/assets/` para `go:embed`.

@@ -41,6 +41,10 @@ describe('asistente de nuevo proyecto', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    // The wizard now follows the installed/configured engine (MariaDB in the
+    // daemon), so pick SQLite explicitly for this case.
+    fireEvent.click(screen.getByRole('button', { name: 'Database' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'sqlite' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
 
     await waitFor(() => expect(projectCreate).toHaveBeenCalled());
@@ -77,6 +81,27 @@ describe('asistente de nuevo proyecto', () => {
     await waitFor(() => expect(projectCreate).toHaveBeenCalled());
     expect(projectCreate.mock.calls.at(-1)![0]).toMatchObject({
       database: 'mariadb', db_name: 'shop_dev', db_user: 'dev', db_password: 'secret',
+    });
+  });
+
+  it('acepta contraseña vacía para el root local de MariaDB', async () => {
+    const daemon = new FakeDaemon({ fixture: demoFixture });
+    const projectCreate = vi.spyOn(daemon, 'projectCreate');
+    renderPane(<ProjectDialog open onClose={() => {}} state={controller(daemon)} />);
+    // Wait for projectInfo(): it selects the configured engine (MariaDB).
+    await screen.findByText('Laravel Installer 5.9.0');
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'shop' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    fireEvent.change(screen.getByLabelText('Database name'), { target: { value: 'shop_dev' } });
+    fireEvent.change(screen.getByLabelText('Database user'), { target: { value: 'root' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+
+    await waitFor(() => expect(projectCreate).toHaveBeenCalled());
+    expect(projectCreate.mock.calls[0]![0]).toMatchObject({
+      database: 'mariadb', db_name: 'shop_dev', db_user: 'root', db_password: '',
     });
   });
 

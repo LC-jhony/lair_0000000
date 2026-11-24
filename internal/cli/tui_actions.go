@@ -1395,13 +1395,16 @@ func (m *tuiModel) applyDialog(dialog string) tea.Cmd {
 			if strings.TrimSpace(m.projectDBUser) == "" {
 				return m.fail("nuevo proyecto", "el usuario de la base de datos es obligatorio")
 			}
-			if m.projectDBPass == "" {
-				return m.fail("nuevo proyecto", "la contraseña de la base de datos es obligatoria")
-			}
+			// La contraseña puede estar vacía: el root local de MariaDB no
+			// tiene contraseña por defecto.
 		}
 		dbName := strings.TrimSpace(m.projectDBName)
 		if dbName == "" {
 			dbName = strings.ReplaceAll(name, "-", "_") + "_dev"
+		}
+		dbUser := strings.TrimSpace(m.projectDBUser)
+		if m.projectDB == "pgsql" && (dbUser == "" || dbUser == "root") {
+			dbUser = "postgres" // initdb creates postgres, not root
 		}
 		return m.run("Creando proyecto…", "nuevo proyecto", daemon.ActionProject, daemon.ProjectRequest{
 			Op: "create",
@@ -1410,7 +1413,7 @@ func (m *tuiModel) applyDialog(dialog string) tea.Cmd {
 				Stack: m.projectStack, Auth: true, Testing: m.projectTest,
 				Boost: false, NodeManager: m.projectNode, Git: false,
 				Database: m.projectDB, DBName: dbName,
-				DBUser: strings.TrimSpace(m.projectDBUser), DBPassword: m.projectDBPass,
+				DBUser: dbUser, DBPassword: m.projectDBPass,
 				DBHost: "127.0.0.1", CreateDB: m.projectCreateDB,
 				StartService: m.projectStart,
 			},

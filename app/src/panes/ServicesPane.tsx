@@ -28,9 +28,14 @@ import { useVersions } from './useVersions';
 // Services that come from the signed catalog. Built-in ones (web, dns) are
 // managed by Lair itself and never show install/build state.
 const CATALOG_SERVICES = new Set([
-  'mariadb', 'mysql', 'postgres', 'mongodb', 'redis', 'valkey',
+  'mariadb', 'postgres', 'mongodb', 'redis', 'valkey',
   'meilisearch', 'typesense', 'rustfs',
 ]);
+
+// MySQL has no signed build in the catalog: MariaDB is the supported MySQL
+// engine in Lair. Keep the `mysql` PDO driver for Laravel projects, but do not
+// offer a service card that can never be installed.
+const HIDDEN_SERVICES = new Set(['mysql']);
 
 // SQLite is a file-based project database, not a supervised process. It gets
 // an informational card so it is discoverable from the Services tab.
@@ -40,7 +45,6 @@ const CATEGORY: Record<string, string> = {
   web: 'services.category.core',
   dns: 'services.category.core',
   mariadb: 'services.category.database',
-  mysql: 'services.category.database',
   postgres: 'services.category.database',
   mongodb: 'services.category.database',
   redis: 'services.category.cacheQueue',
@@ -54,7 +58,9 @@ const CATEGORY: Record<string, string> = {
 export function ServicesPane({ state }: PaneProps) {
   const t = useT();
   const services = state.status?.services ?? {};
-  const ids = Object.keys(services).sort();
+  const ids = Object.keys(services).filter((id) => !HIDDEN_SERVICES.has(id)).sort();
+  // The daemon already reports sqlite3 among the services: never append it a
+  // second time (duplicate cards and inflated totals).
   const catalogIds = ids.includes(SQLITE_ID) ? ids : [...ids, SQLITE_ID];
   const catalog = useVersions(state.client, catalogIds);
   const [installFor, setInstallFor] = useState<string | null>(null);
@@ -77,10 +83,30 @@ export function ServicesPane({ state }: PaneProps) {
   const modalLines = linesFor(modalId);
   const modalDefaultPort = modalId ? (services[modalId]?.port ?? 0) : 0;
 
+  // Redis and Valkey both default to 6379. If another service already owns
+  // that port, offer the next free one instead of sending a port the daemon
+  // will reject with a raw conflict error.
+  const suggestedPort = (id?: string) => {
+    if (!id) return 0;
+    const preferred = services[id]?.port ?? 0;
+    if (!preferred) return 0;
+    const taken = new Set(
+      Object.entries(services)
+        .filter(([other]) => other !== id)
+        .map(([, svc]) => svc.port)
+        .filter((port): port is number => typeof port === 'number' && port > 0),
+    );
+    if (!taken.has(preferred)) return preferred;
+    for (let port = preferred + 1; port <= 65535; port++) {
+      if (!taken.has(port)) return port;
+    }
+    return preferred;
+  };
+
   const openInstall = (id?: string) => {
     const lines = linesFor(id);
     setInstallLine(lines[0]?.id ?? '');
-    setInstallPort(id ? (services[id]?.port ?? 0) : 0);
+    setInstallPort(suggestedPort(id));
     setInstallFor(id ?? 'all');
   };
 
@@ -94,7 +120,7 @@ export function ServicesPane({ state }: PaneProps) {
   // disappearing: the daemon marks them when the signed catalog has no build
   // for the current platform. Installed services always remain visible.
   const isUnavailable = (id: string) => services[id]?.available === false;
-  const visible = [...ids, SQLITE_ID];
+  const visible = catalogIds;
 
   const showLog = (id: string) => {
     void state.act(t('dash.readingLog', { name: id }), async (c) => {
@@ -327,6 +353,7 @@ export function ServicesPane({ state }: PaneProps) {
             port={installPort}
             onPortChange={setInstallPort}
             defaultPort={modalDefaultPort}
+            suggestedPort={suggestedPort(modalId)}
             allowPort={modalDefaultPort > 0}
             busy={!!state.busy}
             onInstall={(line, port) => {

@@ -130,7 +130,7 @@ func Detect(resolver ToolResolver, paths app.Paths) Info {
 		out.LaravelVersion = strings.TrimSpace(commandOutput(bin, "--version"))
 		out.InstallerFlags = helpFlags(commandOutput(bin, "new", "--help"))
 	} else {
-		out.Hint = "laravel/installer no está instalado; se instalará con `" + InstallCommand + "` al crear el primer proyecto"
+		out.Hint = "laravel/installer no está instalado; Lair lo instalará al crear el primer proyecto en su COMPOSER_HOME aislado (" + InstallerHome(paths) + "), sin tocar tu Composer global"
 	}
 	out.Composer = composer.InstalledVersion(paths.Tools)
 	installedPHP, _ := php.Installed(paths)
@@ -241,7 +241,9 @@ func CreateManagedDatabase(driver, name string, create func(string, string) (str
 	return create(id, name)
 }
 
-// EnsureSQLiteFile makes sure Laravel's SQLite database file exists.
+// EnsureSQLiteFile makes sure Laravel's SQLite database file exists. It must
+// be called AFTER `laravel new`: calling it earlier creates the project folder
+// and the installer then aborts with "Application already exists!".
 func EnsureSQLiteFile(parent, name string) error {
 	path := filepath.Join(parent, name, "database", "database.sqlite")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

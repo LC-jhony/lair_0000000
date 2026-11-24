@@ -36,6 +36,15 @@ func (e *Engine) ProjectInfo() project.Info {
 	c, err := e.Config.View()
 	if err == nil {
 		info.ProjectsDir = e.projectsDir(c)
+		// Prefer the configured engine when it is actually installed, so the
+		// wizard asks for DB credentials instead of silently using SQLite.
+		preferred := strings.TrimSpace(c.Defaults["database"])
+		for _, driver := range info.Databases {
+			if driver == preferred {
+				info.DefaultDatabase = preferred
+				break
+			}
+		}
 	} else {
 		info.ProjectsDir = project.DefaultParent()
 	}
@@ -681,12 +690,6 @@ func (e *Engine) createProject(ctx context.Context, req project.CreateRequest, t
 		}
 	}
 
-	if req.Database == "sqlite" {
-		if sqliteErr := project.EnsureSQLiteFile(req.Parent, req.Name); sqliteErr != nil {
-			return fmt.Errorf("no se pudo preparar SQLite: %w", sqliteErr)
-		}
-	}
-
 	log("Creando el proyecto con laravel new…")
 	created = true
 	if err = project.RunLaravel(ctx, e.Paths, bin, req.Parent, req, log); err != nil {
@@ -694,6 +697,17 @@ func (e *Engine) createProject(ctx context.Context, req project.CreateRequest, t
 	}
 	if err = ctx.Err(); err != nil {
 		return err
+	}
+
+	// The installer creates database/database.sqlite itself. Ensure it exists
+	// only AFTER `laravel new` succeeds: creating the folder beforehand makes
+	// the installer reject the target with "Application already exists!".
+	// This is a best-effort fallback, so it must never delete a project that
+	// was created correctly.
+	if req.Database == "sqlite" {
+		if sqliteErr := project.EnsureSQLiteFile(req.Parent, req.Name); sqliteErr != nil {
+			log(fmt.Sprintf("Aviso: no se pudo preparar SQLite: %v", sqliteErr))
+		}
 	}
 
 	log("Guardando la configuración de la base de datos…")

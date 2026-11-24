@@ -8,6 +8,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 VERSION="${1:-1.0.0}"
+# Prefer the notes for this release; fall back to the general changelog.
+NOTES="RELEASE_NOTES.md"
+if [ -f "RELEASE_NOTES_${VERSION}.md" ]; then
+  NOTES="RELEASE_NOTES_${VERSION}.md"
+fi
 GO="${GO:-go}"
 DIST="$ROOT/dist"
 LDFLAGS="-s -w"
@@ -53,7 +58,8 @@ for os in linux darwin; do
     pkg="$STAGE/$os-$arch"
     mkdir -p "$pkg"
     cp "$bin" "$pkg/lair"
-    cp README.md RELEASE_NOTES.md "$pkg/"
+    cp README.md "$pkg/"
+    cp "$NOTES" "$pkg/RELEASE_NOTES.md"
     tar -czf "$DIST/lair_${VERSION}_${os}_${arch}.tar.gz" -C "$pkg" lair README.md RELEASE_NOTES.md
   done
 done
@@ -64,7 +70,8 @@ for arch in amd64 arm64; do
   pkg="$STAGE/windows-$arch"
   mkdir -p "$pkg"
   cp "$bin" "$pkg/lair.exe"
-  cp README.md RELEASE_NOTES.md "$pkg/"
+  cp README.md "$pkg/"
+  cp "$NOTES" "$pkg/RELEASE_NOTES.md"
   (cd "$pkg" && zip -q "$DIST/lair_${VERSION}_windows_${arch}.zip" lair.exe README.md RELEASE_NOTES.md)
 done
 
@@ -74,7 +81,8 @@ if [ "$HAVE_DEB" = 1 ]; then
     mkdir -p "$root/DEBIAN" "$root/usr/bin" "$root/usr/share/doc/lair" \
       "$root/usr/share/applications" "$root/usr/share/icons/hicolor/scalable/apps"
     install -m 0755 "$DIST/lair-linux-$arch" "$root/usr/bin/lair"
-    install -m 0644 README.md RELEASE_NOTES.md "$root/usr/share/doc/lair/"
+    install -m 0644 README.md "$root/usr/share/doc/lair/"
+    install -m 0644 "$NOTES" "$root/usr/share/doc/lair/RELEASE_NOTES.md"
     cp LICENSE "$root/usr/share/doc/lair/copyright"
     chmod 0644 "$root/usr/share/doc/lair/copyright"
     install -m 0644 assets/lair.desktop "$root/usr/share/applications/lair.desktop"

@@ -18,7 +18,8 @@ function controller(client: unknown, status = demoFixture.status): LairControlle
   };
 }
 
-/** Mirrors a Linux daemon: Valkey/Redis have builds, MySQL does not. */
+/** Mirrors a Linux daemon: the real status already includes sqlite3, and
+ * MySQL has no signed build so it is not offered as a service. */
 function linuxFixture() {
   const fixture = structuredClone(demoFixture);
   const services = fixture.status.services;
@@ -27,7 +28,9 @@ function linuxFixture() {
   services.postgres = { ...services.postgres, available: true, platform: 'linux-x64' };
   services.redis = { state: 'missing', running: false, available: true, platform: 'linux-x64' };
   services.valkey = { state: 'missing', running: false, available: true, platform: 'linux-x64' };
-  services.mysql = { state: 'missing', running: false, available: false, platform: 'linux-x64', unavailable_reason: 'no-build' };
+  services.meilisearch = { state: 'missing', running: false, available: false, platform: 'linux-x64', unavailable_reason: 'no-build' };
+  services.sqlite3 = { state: 'missing', running: false };
+  delete services.mysql;
   fixture.versions.redis = ['7.4.6'];
   fixture.versions.valkey = ['9.2.0'];
   fixture.versions.sqlite3 = ['3.54.1'];
@@ -49,8 +52,11 @@ describe('pestaña de servicios', () => {
       </I18nProvider>,
     );
 
-    // 7 services reported by the daemon plus the SQLite information card.
+    // The daemon already reports sqlite3: it must appear only once, and MySQL
+    // must not be offered because it has no signed build.
     expect(await screen.findByText('3 of 8 services installed')).toBeTruthy();
+    expect(screen.getAllByText('SQLite')).toHaveLength(1);
+    expect(screen.queryAllByText('mysql')).toHaveLength(0);
     expect(screen.getAllByText('valkey').length).toBeGreaterThan(0);
     expect(screen.getAllByText('redis').length).toBeGreaterThan(0);
     expect(screen.getByText('Not available on linux-x64')).toBeTruthy();
@@ -71,12 +77,12 @@ describe('pestaña de servicios', () => {
     const fixture = linuxFixture();
     const services = fixture.status.services;
     if (!services) throw new Error('demo fixture has no services');
-    services.mysql = {
+    services.meilisearch = {
       state: 'installed',
       running: false,
-      port: 3306,
-      installed: '8.4.13',
-      version: '8.4.13',
+      port: 7700,
+      installed: '1.30.0',
+      version: '1.30.0',
       available: false,
       platform: 'linux-x64',
     };
@@ -88,7 +94,36 @@ describe('pestaña de servicios', () => {
       </I18nProvider>,
     );
 
-    expect((await screen.findAllByText('mysql')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('meilisearch')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('No signed build in catalog').length).toBeGreaterThan(0);
+    expect(screen.queryAllByText('mysql')).toHaveLength(0);
+  });
+
+  it('sugiere el siguiente puerto libre al instalar valkey con redis en 6379', async () => {
+    const fixture = linuxFixture();
+    const services = fixture.status.services;
+    if (!services) throw new Error('demo fixture has no services');
+    services.redis = {
+      state: 'installed', running: true, port: 6379,
+      installed: '7.4.6', version: '7.4.6', available: true, platform: 'linux-x64',
+    };
+    services.valkey = {
+      state: 'missing', running: false, port: 6379, available: true, platform: 'linux-x64',
+    };
+    const daemon = new FakeDaemon({ fixture });
+    const installService = vi.spyOn(daemon, 'installService');
+
+    render(
+      <I18nProvider>
+        <ServicesPane state={controller(daemon, fixture.status)} />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Install valkey' }));
+    const confirm = await screen.findByRole('button', { name: 'Install valkey 9.2.0' });
+    expect(screen.getByRole('spinbutton')).toHaveValue(6380);
+    expect(screen.getByText('Port 6379 is taken; suggesting 6380')).toBeTruthy();
+    fireEvent.click(confirm);
+    await vi.waitFor(() => expect(installService).toHaveBeenCalledWith('valkey', '9.2.0', 6380));
   });
 });

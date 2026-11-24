@@ -20,9 +20,11 @@ const DefaultMaxAge = 6 * time.Hour
 // DefaultBaseURLs are the signed-manifest mirrors, tried in order. Trust comes
 // from the Ed25519 signature, not from the host that served the manifest.
 var DefaultBaseURLs = []string{
-	"https://raw.githubusercontent.com/lair-sh/lair/main/catalog",
-	"https://cdn.lair.sh/stable",
-	"https://lair-builds.github.io/stable",
+	// The published repository is LC-jhony/lair. The old lair-sh URL returned
+	// 404, cdn.lair.sh does not resolve and lair-builds.github.io has no Pages
+	// site, so keeping them only produced misleading "all mirrors failed"
+	// warnings. Trust still comes from the Ed25519 signature, not the host.
+	"https://raw.githubusercontent.com/LC-jhony/lair/main/catalog",
 }
 
 // CatalogConfig configures a Catalog. PublicKey/Channel/BaseURLs are required.
@@ -187,7 +189,9 @@ func (c *Catalog) Subscribe(fn func(*Manifest)) {
 }
 
 func (c *Catalog) fetch(ctx context.Context, name string) ([]byte, error) {
-	var lastErr error
+	// Keep every failure: reporting only the last mirror hid the fact that all
+	// of them were broken and pointed the user at the wrong host.
+	failures := []string{}
 	for _, base := range c.cfg.BaseURLs {
 		url := strings.TrimSpace(base)
 		if url == "" {
@@ -200,27 +204,27 @@ func (c *Catalog) fetch(ctx context.Context, name string) ([]byte, error) {
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+name, nil)
 		if err != nil {
-			lastErr = err
+			failures = append(failures, url+": "+err.Error())
 			continue
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			lastErr = err
+			failures = append(failures, url+": "+err.Error())
 			continue
 		}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 		resp.Body.Close()
 		if err != nil {
-			lastErr = err
+			failures = append(failures, url+": "+err.Error())
 			continue
 		}
 		if resp.StatusCode != http.StatusOK {
-			lastErr = fmt.Errorf("%s: HTTP %d", url, resp.StatusCode)
+			failures = append(failures, fmt.Sprintf("%s: HTTP %d", url, resp.StatusCode))
 			continue
 		}
 		return body, nil
 	}
-	return nil, fmt.Errorf("fetch %s from all base URLs: %w", name, lastErr)
+	return nil, fmt.Errorf("fetch %s from all base URLs: %s", name, strings.Join(failures, "; "))
 }
 
 // Refresh downloads, verifies and (on success) persists a new manifest. It

@@ -19,7 +19,7 @@ interactiva, Lair ofrece instalarla y reintentar; sin TTY devuelve un error.
 ```sh
 lair pin php 8.2               # escribe php=8.2 en .lairrc
 lair pin node 20               # escribe node=20 en .lairrc
-lair pin root ~/.local/share/lair-otro  # root=: data root alternativo (debe estar bajo $HOME)
+lair pin root /home/usuario/.local/share/lair-otro  # root=: ruta ABSOLUTA bajo $HOME (no expansiones ~)
 lair unpin php                 # quita la línea
 lair isolate php 8.4           # fija la versión en el sitio aparcado (config.json)
 lair isolate node --off        # alias de unisolate
@@ -40,13 +40,13 @@ archivos canónicos son `.lairrc` y `lair.json`.
 Dos proyectos pueden convivir con versiones distintas:
 
 ```sh
-cd ~/Sites/blog && echo 'php=8.2
+cd ~/Lair/blog && echo 'php=8.2
 node=20' > .lairrc
-cd ~/Sites/api && echo 'php=8.4
+cd ~/Lair/api && echo 'php=8.4
 node=22' > .lairrc
 
-cd ~/Sites/blog && php -v && node -v   # PHP 8.2 / Node 20
-cd ~/Sites/api  && php -v && node -v   # PHP 8.4 / Node 22
+cd ~/Lair/blog && php -v && node -v   # PHP 8.2 / Node 20
+cd ~/Lair/api  && php -v && node -v   # PHP 8.4 / Node 22
 ```
 
 La versión de PHP elegida también se usa para ejecutar Composer: el shim

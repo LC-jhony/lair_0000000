@@ -57,10 +57,15 @@ case "$1" in
       exit 0
     fi
     name="$1"
+    # Mimic the real installer: refuse a pre-existing target. It catches
+    # Lair creating the SQLite folder before laravel new runs.
+    if [ -e "$name" ]; then
+      echo "Application already exists!" >&2
+      exit 1
+    fi
     shift
     echo "fake laravel new $name $*"
-    mkdir -p "$name/database"
-    : > "$name/database/database.sqlite"
+    mkdir -p "$name"
     printf 'APP_NAME=Lair\nAPP_URL=http://old\nDB_PASSWORD=old\n' > "$name/.env"
     printf 'APP_NAME=Lair\nAPP_URL=http://old\nDB_PASSWORD=\n' > "$name/.env.example"
     exit 0;;
@@ -120,6 +125,10 @@ func TestProjectCreate(t *testing.T) {
 	}
 	if !strings.Contains(string(env), "APP_URL=http://blog.test") || !strings.Contains(string(env), "DB_CONNECTION=sqlite") {
 		t.Fatalf("env = %s", env)
+	}
+	// Lair creates the SQLite file after the installer, never before it.
+	if _, err := os.Stat(filepath.Join(target, "database", "database.sqlite")); err != nil {
+		t.Fatalf("sqlite file missing after creation: %v", err)
 	}
 	c, err := e.Config.View()
 	if err != nil {

@@ -1,23 +1,23 @@
 # Node.js en Lair
 
-Lair instala builds oficiales de Node verificados contra el catálogo firmado.
-Se conserva **una versión por mayor** bajo `<root>/node/<versión>/`; al
-instalar una release más nueva de la misma mayor se eliminan las antiguas.
+Lair instala Node a través de **nvm**: las versiones viven en
+`~/.nvm/versions/node`, no bajo `$LAIR_HOME/node`. El catálogo firmado publica
+`v26.13.1` (LTS, npm 11.20.0); otras mayores se resuelven con nvm y red.
 
 ```sh
-lair node install 22           # última release publicada de la mayor 22
-lair node install 22.11.0      # también resuelve a la última de la mayor
+lair node install              # última LTS del catálogo (v26.13.1)
+lair node install 26           # última release de la mayor 26
+lair node install lts          # LTS actual vía nvm
 lair node list
-lair node default 22
-lair node update 22
-lair node uninstall 22         # la default no se puede quitar
-lair node install --from ./node-v22.11.0-linux-x64.tar.gz
+lair node default 26
+lair node update 26
+lair node uninstall 26         # la default no se puede quitar
+lair node install --from ./node-v26.13.1-linux-x64.tar.gz
 ```
 
-`22`, `22.11` y `22.11.0` son equivalentes: el catálogo guarda una release por
-mayor. En la primera ejecución se instala la LTS más nueva y se fija como
-default. **Node se instala siempre a través de nvm**: `lair node install` llama
-a `lair nvm install <versión>`, que carga `~/.nvm/nvm.sh` con argv validado.
+`26`, `26.13` y `26.13.1` se resuelven a la release disponible de esa mayor.
+**Node se instala siempre a través de nvm**: `lair node install` llama a
+`lair nvm install <versión>`, que carga `~/.nvm/nvm.sh` con argv validado.
 También puedes usar `lair nvm install|use|ls|current|exec|uninstall`
 directamente; `lair nvm exec` es lo que usan los shims `node`/`npm`/`npx`.
 Si nvm no está instalado, Lair avisa con la URL de instalación y no descarga
@@ -25,10 +25,12 @@ scripts remotos por su cuenta.
 
 ## npm
 
-Cada mayor tiene su propio prefijo global en `<root>/node/global/<mayor>/`, de
-modo que `npm install -g` sobrevive a una actualización dentro de la mayor. El
-enlace estable `<root>/node/global/current` apunta al prefijo de la mayor por
-defecto (symlink en Unix, *junction* en Windows) y se añade al PATH del shell.
+Con nvm, el prefijo global de npm vive junto a la versión activa en
+`~/.nvm/versions/node/<versión>/`, por lo que `npm install -g` sobrevive a
+actualizaciones dentro de la misma mayor. En instalaciones sin nvm (algunos
+casos de Windows) se usa un prefijo bajo `$LAIR_HOME/node/global/<mayor>/` y un
+enlace `current` que apunta a la mayor por defecto. En ambos casos los shims
+inyectan `NPM_CONFIG_PREFIX` en el PATH.
 
 ```sh
 lair npm update                # última npm compatible con los engines del Node

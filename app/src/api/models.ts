@@ -315,6 +315,7 @@ export interface ProjectInfo {
   pdo_drivers?: string[];
   node_managers?: string[];
   databases?: string[];
+  default_database?: string;
   projects_dir?: string;
   hint?: string;
 }

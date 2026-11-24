@@ -47,6 +47,7 @@ type Info struct {
 	PDO              []string `json:"pdo_drivers"`
 	NodeManagers     []string `json:"node_managers"`
 	Databases        []string `json:"databases"`
+	DefaultDatabase  string   `json:"default_database,omitempty"`
 	ProjectsDir      string   `json:"projects_dir,omitempty"`
 	Hint             string   `json:"hint,omitempty"`
 }
@@ -174,9 +175,8 @@ func (r *CreateRequest) Normalize() (target string, err error) {
 		if r.DBUser == "" {
 			return "", fmt.Errorf("indica el usuario de la base de datos")
 		}
-		if strings.TrimSpace(r.DBPassword) == "" {
-			return "", fmt.Errorf("indica la contraseña de la base de datos")
-		}
+		// An empty password is valid: Lair's local MariaDB/MySQL root has no
+		// password by default. Do not require one here.
 		if strings.TrimSpace(r.DBHost) == "" {
 			r.DBHost = "127.0.0.1"
 		}

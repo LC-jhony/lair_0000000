@@ -130,8 +130,16 @@ func run(args []string, out, errOut io.Writer) error {
 	case "project":
 		return c.project(rest)
 	case "migrate-dirs":
+		if hasHelp(rest) {
+			c.printf("usage: lair migrate-dirs [<desde> <hacia>]\n")
+			return nil
+		}
 		return c.projectMigrateDirs(rest)
 	case "import-valet":
+		if hasHelp(rest) {
+			c.printf("usage: lair import-valet\n")
+			return nil
+		}
 		return c.projectImportValet()
 	case "new":
 		return c.newProject(rest)
@@ -183,6 +191,17 @@ func run(args []string, out, errOut io.Writer) error {
 }
 
 func isHelp(s string) bool { return s == "help" || s == "--help" || s == "-h" }
+
+// hasHelp detects a help request anywhere in a subcommand's arguments, so
+// `lair new blog --help` never starts a real creation.
+func hasHelp(args []string) bool {
+	for _, arg := range args {
+		if isHelp(arg) {
+			return true
+		}
+	}
+	return false
+}
 
 func usage(w io.Writer) {
 	fmt.Fprint(w, `lair - native PHP/Laravel development environments

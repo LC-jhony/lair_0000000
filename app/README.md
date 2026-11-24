@@ -2,20 +2,20 @@
 
 Aplicación nativa de administración de Lair para Linux, macOS y Windows con una sola base de código: Electron + React + TypeScript + Vite. Sustituye al panel web embebido.
 
-Estado actual: componentes base, i18n, bridge de Electron, cliente HTTP y FakeDaemon con fixtures. Las panes completas y las capturas claro/oscuro llegan en el siguiente paso; el shell muestra temporalmente la clave settings.pane.comingSoon.
+Estado actual: diez panes completas, i18n (es/en/cs), bridge de Electron, cliente HTTP y FakeDaemon con fixtures. Las capturas de cada pane están en [`../docs/screenshots/`](../docs/screenshots/).
 
 ## Principios
 
 1. El daemon es la única fuente de verdad: la UI adopta los catálogos que devuelven las acciones.
 2. Las operaciones largas son jobs con polling; nunca bloquean la ventana.
 3. Nada destructivo sin confirmación; el texto explica qué pasa con datos y servicios.
-4. Un mismo estilo de fila y acciones para PHP, Node, FrankenPHP y servicios.
+4. Un mismo estilo de fila y acciones para PHP, Node, bases de datos y servicios.
 5. Todo texto visible es una clave de lang/codigo/app.json; no hay literales en la UI.
 6. Paridad en las tres plataformas: los mismos componentes React se empaquetan para Linux, macOS y Windows.
 
 ## Arranque
 
-Necesitas Node 20+ y npm con el daemon de Lair instalado.
+Necesitas Node 22+ y npm con el daemon de Lair instalado (CI usa Node 22).
 
 Comandos: `npm install`, `npm run dev` (Vite), `npm run electron:dev` (Ventana Electron apuntando al puerto 5173), `npm test`, `npm run typecheck`, `npm run i18n:check`, `npm run build` y `npm run dist` (electron-builder).
 

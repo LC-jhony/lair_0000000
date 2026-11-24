@@ -9,7 +9,7 @@ La SPA embebida se sustituye por una app nativa (Electron + React en `app/`). El
 
 ## Decisión
 
-`internal/desktopapi` publica únicamente `POST /api` en `127.0.0.1:9797` (configurable con `--desktop-port`). La autenticación exige la cabecera **`X-Lair-Token`**, comparada en tiempo constante; se rechazan tokens en query o fragmento. El CORS se limita a orígenes locales/Electron (`null`, `localhost`, `127.0.0.1`, `::1`). El token se escribe en `run/desktop.token` (`0600`) y la URL base en `run/desktop.url` (`0600`), dentro de `run/` (`0700`). El proceso principal de Electron lee ambos archivos y los entrega al renderer por IPC con `contextIsolation`: el renderer no tiene filesystem. `lair desktop` (alias `lair ui`) muestra los datos de conexión y arranca el daemon si hace falta.
+`internal/desktopapi` publica únicamente `POST /api` en `127.0.0.1:9797` (configurable con `--desktop-port`). La autenticación exige la cabecera **`X-Lair-Token`**, comparada en tiempo constante; se rechazan tokens en query o fragmento. El CORS se limita a orígenes HTTP(S) locales (`localhost`, `127.0.0.1`, `::1`); el origen `null` se rechaza porque es falsificable. Electron llama desde el proceso principal, sin cabecera `Origin`. El token se escribe en `run/desktop.token` (`0600`) y la URL base en `run/desktop.url` (`0600`), dentro de `run/` (`0700`). El proceso principal de Electron lee ambos archivos y los entrega al renderer por IPC con `contextIsolation`: el renderer no tiene filesystem. `lair desktop` (alias `lair ui`) muestra los datos de conexión y arranca el daemon si hace falta.
 
 ## Alternativas
 

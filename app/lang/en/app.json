@@ -310,7 +310,7 @@
   "project.invalidName": "Use lowercase letters, numbers and hyphens (max. 63).",
   "project.invalidParent": "Choose an existing parent folder.",
   "project.invalidDatabase": "Enter a valid database name.",
-  "project.invalidCredentials": "Enter the database user and password.",
+  "project.invalidCredentials": "Enter the database user (the password can be left empty).",
   "web.securing": "Issuing certificate for {{name}}…",
   "project.invalidPort": "Enter a port between 1 and 65535.",
   "project.failed": "Project creation failed.",

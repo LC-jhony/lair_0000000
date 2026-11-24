@@ -7,6 +7,13 @@ import type { LairController } from '../useLair';
 const NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const DB_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
+// Preferred DB user and port per engine. MariaDB/MySQL install with a
+// passwordless `root`; PostgreSQL's initdb creates `postgres`, not `root`.
+const DB_USER: Record<string, string> = { pgsql: 'postgres' };
+const DB_PORT: Record<string, number> = {
+  mysql: 3306, mariadb: 3306, pgsql: 5432, sqlsrv: 1433,
+};
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -59,6 +66,18 @@ export function ProjectDialog({ open, onClose, state }: Props) {
   const set = <K extends keyof Form>(key: K, value: Form[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }));
 
+  const changeDatabase = (value: string) => {
+    const engine = value as Form['database'];
+    setForm((prev) => ({
+      ...prev,
+      database: engine,
+      dbUser: prev.dbUser === 'root' || !prev.dbUser.trim()
+        ? (DB_USER[engine] ?? 'root')
+        : prev.dbUser,
+      dbPort: String(state.status?.services?.[engine]?.port ?? DB_PORT[engine] ?? ''),
+    }));
+  };
+
   useEffect(() => {
     if (!open || !state.client) return;
     let alive = true;
@@ -68,9 +87,19 @@ export function ProjectDialog({ open, onClose, state }: Props) {
       // The daemon owns the default folder: use it unless the user already
       // typed a parent. Never default to the current directory or LAIR_HOME.
       const projectsDir = result.projects_dir?.trim();
-      if (projectsDir) {
-        setForm((prev) => (prev.parent.trim() ? prev : { ...prev, parent: projectsDir }));
-      }
+      const preferredDB = result.default_database?.trim();
+      setForm((prev) => {
+        const next = { ...prev };
+        if (projectsDir && !next.parent.trim()) next.parent = projectsDir;
+        if (preferredDB && result.databases?.includes(preferredDB)) {
+          next.database = preferredDB as Form['database'];
+          if (next.dbUser === 'root' || !next.dbUser.trim()) next.dbUser = DB_USER[preferredDB] ?? 'root';
+          if (!next.dbPort.trim()) {
+            next.dbPort = String(state.status?.services?.[preferredDB]?.port ?? DB_PORT[preferredDB] ?? '');
+          }
+        }
+        return next;
+      });
     }).catch(() => undefined);
     return () => { alive = false; };
   }, [open, state.client]);
@@ -115,13 +144,17 @@ export function ProjectDialog({ open, onClose, state }: Props) {
     onClose();
   };
 
-  const validate = (): string => {
+  // Validate only the fields of the current step. Validating the whole form
+  // on step 1 would block navigation with database errors the user cannot see
+  // yet (e.g. MariaDB is the configured default).
+  const validate = (atStep = step): string => {
     if (!NAME_RE.test(form.name)) return t('project.invalidName');
     // An empty parent is valid: the daemon resolves it to the configured
     // sites folder (default ~/Lair), never to the current directory.
-    if (form.database !== 'sqlite') {
+    if (atStep >= 3 && form.database !== 'sqlite') {
       if (!DB_RE.test(form.dbName)) return t('project.invalidDatabase');
-      if (!form.dbUser.trim() || !form.dbPassword.trim()) return t('project.invalidCredentials');
+      // An empty password is valid for Lair's passwordless local MariaDB root.
+      if (!form.dbUser.trim()) return t('project.invalidCredentials');
       if (form.dbPort.trim()) {
         const port = Number(form.dbPort);
         if (!Number.isInteger(port) || port < 1 || port > 65535) return t('project.invalidPort');
@@ -213,7 +246,7 @@ export function ProjectDialog({ open, onClose, state }: Props) {
         disabled={!state.client}
         onClick={() => {
           if (step < 3) {
-            const problem = step === 0 ? validate() : '';
+            const problem = validate(step);
             setError(problem);
             if (problem) return;
             setStep(step + 1);
@@ -306,7 +339,7 @@ export function ProjectDialog({ open, onClose, state }: Props) {
 
           {step === 3 && (
             <div className="grid gap-4">
-              <Select value={form.database} onChange={(v) => set('database', v as Form['database'])} options={options(databases)} label={t('project.database')} />
+              <Select value={form.database} onChange={changeDatabase} options={options(databases)} label={t('project.database')} />
               {form.database === 'sqlite' ? (
                 <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">{t('project.sqliteHelp')}</p>
               ) : (

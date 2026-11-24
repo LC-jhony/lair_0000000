@@ -57,12 +57,23 @@ func TestNormalize(t *testing.T) {
 		{Name: "app", Parent: parent, Stack: "unknown", Testing: "pest", NodeManager: "npm", Database: "sqlite"},
 		{Name: "app", Parent: parent, Stack: "blade", Testing: "pest", NodeManager: "npm", Database: "mysql", DBName: "bad-name", DBUser: "dev", DBPassword: "x"},
 		{Name: "app", Parent: parent, Stack: "blade", Testing: "pest", NodeManager: "npm", Database: "mysql", DBName: "ok", DBUser: "", DBPassword: "x"},
-		{Name: "app", Parent: parent, Stack: "blade", Testing: "pest", NodeManager: "npm", Database: "mysql", DBName: "ok", DBUser: "dev", DBPassword: ""},
 	}
 	for i := range bad {
 		if _, err := bad[i].Normalize(); err == nil {
 			t.Errorf("case %d should fail", i)
 		}
+	}
+}
+
+func TestNormalizeAllowsPasswordlessDatabase(t *testing.T) {
+	parent := t.TempDir()
+	req := CreateRequest{
+		Name: "mi-app", Parent: parent, Stack: "blade", Testing: "pest",
+		NodeManager: "npm", Database: "mariadb", DBName: "mi_app_dev",
+		DBUser: "root", DBPassword: "", // Lair's local MariaDB root has no password.
+	}
+	if _, err := req.Normalize(); err != nil {
+		t.Fatalf("passwordless MariaDB must be accepted: %v", err)
 	}
 }
 

@@ -134,6 +134,49 @@ func expectedFor(id string) []string {
 	}
 }
 
+// chooseInstallPort resolves a service port when the caller did not pick one.
+// Redis and Valkey both default to 6379, so installing the second one through
+// the wizard (which sends no explicit port) must not fail with a raw config
+// conflict: pick the next port that is neither assigned to another Lair
+// service nor held by a process. An explicit port is always respected.
+func (e *Engine) chooseInstallPort(id string, requested int) int {
+	if requested != 0 {
+		return requested
+	}
+	c, err := e.Config.View()
+	if err != nil {
+		return services.DefaultPort(id)
+	}
+	preferred := services.DefaultPort(id)
+	if current := c.Ports[id]; current > 0 {
+		preferred = current // reinstalling keeps the service's own port
+	}
+	taken := map[int]bool{}
+	for otherID, p := range c.Ports {
+		if otherID != id && p > 0 {
+			taken[p] = true
+		}
+	}
+	if !taken[preferred] {
+		return preferred
+	}
+	for p := preferred + 1; p <= 65535; p++ {
+		if taken[p] || services.PortInUse(p) {
+			continue
+		}
+		blocked := false
+		for _, aux := range services.AuxPorts(id, p) {
+			if aux <= 0 || aux > 65535 || services.PortInUse(aux) {
+				blocked = true
+			}
+		}
+		if !blocked {
+			return p
+		}
+	}
+	return preferred // let the regular validation report the conflict
+}
+
 // InstallService downloads and initialises a service version. Installing a new
 // version never changes the active one unless it is the first installation.
 func (e *Engine) InstallService(ctx context.Context, id, request string, port int) (*installer.Job, error) {
@@ -159,8 +202,8 @@ func (e *Engine) InstallService(ctx context.Context, id, request string, port in
 	// break the documented Laravel defaults, so the installer never offers it.
 	if id == "postgres" {
 		port = services.DefaultPort(id)
-	} else if port == 0 {
-		port = services.DefaultPort(id)
+	} else {
+		port = e.chooseInstallPort(id, port)
 	}
 	// One active version per port: reject a port already assigned to a
 	// different service in config, before touching the network or disk.
@@ -380,6 +423,10 @@ func (e *Engine) UninstallService(id, ver string, deleteData bool) error {
 			remaining := e.installedServiceVersions(id)
 			if len(remaining) > 0 {
 				c.Defaults[id] = remaining[0]
+			} else {
+				// Release the port so another service (e.g. Valkey after
+				// Redis) can take it without a stale config conflict.
+				delete(c.Ports, id)
 			}
 		}
 		return nil

@@ -27,6 +27,33 @@ func projectFlag(args []string, name string) string {
 	return ""
 }
 
+// projectValueFlags lists options whose value is the following argument. The
+// name parser must skip those values: `lair new --database mariadb blog` has
+// `blog` as the project name, not `mariadb`.
+func projectValueFlags() map[string]bool {
+	return map[string]bool{
+		"--parent": true, "--database": true, "--db-name": true, "--db-user": true,
+		"--db-password": true, "--db-host": true, "--db-port": true,
+		"--stack": true, "--testing": true, "--node-manager": true,
+	}
+}
+
+func projectNameArg(args []string) string {
+	values := projectValueFlags()
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if strings.HasPrefix(arg, "-") {
+			flag := strings.SplitN(arg, "=", 2)[0]
+			if values[flag] && !strings.Contains(arg, "=") && i+1 < len(args) {
+				i++ // the value is not the project name
+			}
+			continue
+		}
+		return arg
+	}
+	return ""
+}
+
 func (c *ctx) project(args []string) error {
 	if len(args) == 0 || isHelp(args[0]) {
 		c.projectUsage()
@@ -51,6 +78,9 @@ func (c *ctx) project(args []string) error {
 		c.printf("PDO: %s\n", orNone(info.PDO))
 		c.printf("Gestores Node: %s\n", orNone(info.NodeManagers))
 		c.printf("Bases de datos: %s\n", orNone(info.Databases))
+		if info.DefaultDatabase != "" {
+			c.printf("Motor configurado: %s\n", info.DefaultDatabase)
+		}
 		c.printf("Carpeta de proyectos: %s\n", orDash(info.ProjectsDir))
 		return nil
 	case "sync":
@@ -61,6 +91,10 @@ func (c *ctx) project(args []string) error {
 		c.printf("Proyectos sincronizados.\n")
 		return nil
 	case "dir":
+		if hasHelp(args[1:]) {
+			c.printf("usage: lair project dir [<ruta>]\n")
+			return nil
+		}
 		if len(args) < 2 {
 			var out daemon.ProjectResult
 			if err := c.call(daemon.ActionProject, daemon.ProjectRequest{Op: "info"}, &out); err != nil {
@@ -78,8 +112,16 @@ func (c *ctx) project(args []string) error {
 	case "dirs":
 		return c.projectDirs(args[1:])
 	case "migrate-dirs":
+		if hasHelp(args[1:]) {
+			c.printf("usage: lair migrate-dirs [<desde> <hacia>]\n")
+			return nil
+		}
 		return c.projectMigrateDirs(args[1:])
 	case "import-valet":
+		if hasHelp(args[1:]) {
+			c.printf("usage: lair import-valet\n")
+			return nil
+		}
 		return c.projectImportValet()
 	case "new", "create":
 		return c.projectNew(args[1:])
@@ -92,6 +134,10 @@ func (c *ctx) project(args []string) error {
 // operations go through the single `project` action so the CLI, the TUI and
 // the desktop app share the exact same wire contract.
 func (c *ctx) projectDirs(args []string) error {
+	if hasHelp(args) {
+		c.printf("usage: lair project dirs [list|add <ruta>|remove <ruta>|default <ruta>]\n")
+		return nil
+	}
 	op := "dirs-list"
 	dir := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -157,7 +203,7 @@ func (c *ctx) projectImportValet() error {
 // newProject is the canonical CLI entry point for creating a Laravel project.
 // `lair project new` remains as a compatibility alias.
 func (c *ctx) newProject(args []string) error {
-	if len(args) == 0 || isHelp(args[0]) {
+	if len(args) == 0 || hasHelp(args) {
 		c.printf("usage: lair new <name> [opciones]\n")
 		c.printf("Alias de `lair project new`. Opciones:\n")
 		c.projectUsage()
@@ -167,13 +213,12 @@ func (c *ctx) newProject(args []string) error {
 }
 
 func (c *ctx) projectNew(args []string) error {
-	name := ""
-	for _, arg := range args {
-		if !strings.HasPrefix(arg, "-") {
-			name = arg
-			break
-		}
+	if hasHelp(args) {
+		c.printf("usage: lair project new <name> [options]\n")
+		c.projectUsage()
+		return nil
 	}
+	name := projectNameArg(args)
 	if name == "" {
 		return fmt.Errorf("usage: lair project new <name> [options]")
 	}
@@ -219,7 +264,7 @@ func (c *ctx) projectNew(args []string) error {
 			Git:          hasFlag(args, "--git"),
 			Database:     driver,
 			DBName:       orDefault(projectFlag(args, "--db-name"), strings.ReplaceAll(name, "-", "_")+"_dev"),
-			DBUser:       orDefault(projectFlag(args, "--db-user"), "root"),
+			DBUser:       orDefault(projectFlag(args, "--db-user"), defaultDBUser(driver)),
 			DBPassword:   password,
 			DBHost:       orDefault(projectFlag(args, "--db-host"), "127.0.0.1"),
 			DBPort:       port,
@@ -305,4 +350,13 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// defaultDBUser follows the user created by Lair's service initialisation:
+// MariaDB/MySQL use a passwordless root, PostgreSQL's initdb creates postgres.
+func defaultDBUser(driver string) string {
+	if driver == "pgsql" {
+		return "postgres"
+	}
+	return "root"
 }

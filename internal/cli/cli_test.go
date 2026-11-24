@@ -59,6 +59,41 @@ func TestNewCommandHelpAndUsage(t *testing.T) {
 	}
 }
 
+func TestProjectNameArgSkipsOptionValues(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"blog", "--database", "mariadb"}, "blog"},
+		{[]string{"--database", "mariadb", "blog"}, "blog"},
+		{[]string{"--parent", "/tmp/x", "--database=sqlite", "mi-app"}, "mi-app"},
+		{[]string{"--secure", "--no-auth", "shop"}, "shop"},
+		{[]string{"--db-name", "shop_dev", "shop"}, "shop"},
+	}
+	for _, tc := range cases {
+		if got := projectNameArg(tc.args); got != tc.want {
+			t.Errorf("projectNameArg(%v) = %q, want %q", tc.args, got, tc.want)
+		}
+	}
+}
+
+func TestHelpAfterNameDoesNotCreate(t *testing.T) {
+	for _, args := range [][]string{
+		{"new", "blog", "--help"},
+		{"project", "new", "blog", "--help"},
+		{"import-valet", "--help"},
+		{"project", "dir", "--help"},
+	} {
+		var out, errOut bytes.Buffer
+		if err := run(args, &out, &errOut); err != nil {
+			t.Fatalf("run(%v): %v", args, err)
+		}
+		if !strings.Contains(out.String(), "usage:") && !strings.Contains(out.String(), "lair new <name>") {
+			t.Errorf("run(%v) did not print help: %q", args, out.String())
+		}
+	}
+}
+
 func TestTUIHelp(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if err := run([]string{"tui", "--help"}, &out, &errOut); err != nil {
