@@ -166,7 +166,7 @@ func (e *Engine) runLocalInstall(ctx context.Context, id, pkg, ver string, src d
 			log("installing local build into staging")
 			return download.Install([]download.Source{src}, dest, expected, opts...)
 		},
-		OnSuccess: func() error { return onSuccess(dest) },
+		OnSuccess: func(*installer.Job) error { return onSuccess(dest) },
 	})
 	if err != nil {
 		return nil, err

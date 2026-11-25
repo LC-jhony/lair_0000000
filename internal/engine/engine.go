@@ -493,7 +493,7 @@ func (e *Engine) installNodeWithNVM(ctx context.Context, request string) (*insta
 			}
 			return err
 		},
-		OnSuccess: func() error {
+		OnSuccess: func(job *installer.Job) error {
 			resolved := nvm.NewInstalled(before, nvm.InstalledVersions())
 			if resolved == "" {
 				resolved = spec

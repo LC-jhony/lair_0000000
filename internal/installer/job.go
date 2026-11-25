@@ -334,11 +334,14 @@ func (m *Manager) run(ctx context.Context, req Request, job *Job, cancel context
 // RunRequest describes a job that performs local work instead of downloading a
 // verified artifact. It is used for operations owned by another tool (nvm).
 type RunRequest struct {
-	ID        string
-	Package   string
-	Version   string
-	Run       func(ctx context.Context, log func(string)) error
-	OnSuccess func() error
+	ID      string
+	Package string
+	Version string
+	Run     func(ctx context.Context, log func(string)) error
+	// OnSuccess receives the running job explicitly: the manager starts the
+	// goroutine before Run returns, so capturing the caller's job variable
+	// would race and could dereference nil on a fast worker.
+	OnSuccess func(job *Job) error
 }
 
 // SetVersion updates the version reported by a running job once the real
@@ -398,7 +401,7 @@ func (m *Manager) Run(parent context.Context, req RunRequest) (*Job, error) {
 			return
 		}
 		if req.OnSuccess != nil {
-			if err := req.OnSuccess(); err != nil {
+			if err := req.OnSuccess(job); err != nil {
 				job.set(func(s *Status) { s.Error = err.Error(); s.Done = true })
 				job.log("setup failed: " + err.Error())
 				m.finish(req.ID, job, nil, false)

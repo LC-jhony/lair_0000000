@@ -51,7 +51,7 @@ func TestManagerRun(t *testing.T) {
 			log("Now using node v22.16.0")
 			return nil
 		},
-		OnSuccess: func() error { success = true; return nil },
+		OnSuccess: func(*Job) error { success = true; return nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -245,7 +245,7 @@ func TestOnSuccessFailurePropagatesToJobStatus(t *testing.T) {
 	job, err := m.Run(context.Background(), RunRequest{
 		ID:  "fail-setup",
 		Run: func(context.Context, func(string)) error { return nil },
-		OnSuccess: func() error {
+		OnSuccess: func(*Job) error {
 			return fmt.Errorf("setup exploded")
 		},
 	})
