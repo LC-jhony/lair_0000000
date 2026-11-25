@@ -48,8 +48,10 @@ type Engine struct {
 	// and leave the generated per-site files out of sync with disk.
 	webControlMu sync.Mutex
 	webMu        sync.Mutex
-	webWarning   string
-	webError     string
+	// dbMu serialises snapshot/restore/import/export against each other.
+	dbMu       sync.Mutex
+	webWarning string
+	webError   string
 
 	// mailMu guards the lazy, long-lived SMTP catcher. It is owned by the
 	// engine so the CLI fallback and the daemon share the same lifecycle.
@@ -121,20 +123,23 @@ func (e *Engine) reloadSites() {
 				phpAddr = fmt.Sprintf("127.0.0.1:%d", port)
 			}
 		}
-		_, certErr := os.Stat(filepath.Join(e.Paths.Certs, name+".pem"))
 		// The descriptive fields are informational only: routing still uses
 		// name/root/php_socket/secure and the three version pins.
 		detail := e.siteDetail(c, name, site)
+		profile, docRoot, front := siteProfile(site.Path)
+		if profile != "" {
+			detail.Framework = profile
+		}
 		_ = e.Web.Router.Add(web.Site{
 			Name: name, Root: site.Path, PHPSocket: sock, PHPAddr: phpAddr,
-			Secure: certErr == nil, Enabled: site.Enabled,
+			Secure: e.siteIsSecure(name, site), Enabled: site.Enabled,
 			PHP: site.PHP, Node: site.Node, Database: site.Database,
 			Type: detail.Type, Framework: detail.Framework,
 			PHPVersion: detail.PHPVersion, PHPSource: detail.PHPSource, PHPFile: detail.PHPFile,
 			NodeSource: detail.NodeSource, NodeFile: detail.NodeFile,
 			RootState: detail.RootState, RootSuggestions: detail.RootSuggestions,
 			Domains: detail.Domains, Problem: detail.Problem, Notice: detail.Notice,
-			URL: detail.URL,
+			URL: detail.URL, DocRoot: docRoot, FrontController: front,
 		})
 	}
 	for _, registered := range e.Web.Router.List() {
@@ -667,7 +672,34 @@ func (e *Engine) NodeUpdate(ctx context.Context, major string) (*installer.Job, 
 }
 
 // Logs returns the contents of a log file by name without allowing traversal.
+// Site logs are addressed as `site:<registered-name>:<file>` because they live
+// in the project's storage/logs directory, not in LAIR_HOME/log.
 func (e *Engine) Logs(name string) (string, error) {
+	if strings.HasPrefix(name, "site:") {
+		parts := strings.Split(name, ":")
+		if len(parts) != 3 || parts[1] == "" {
+			return "", fmt.Errorf("invalid log name")
+		}
+		file := parts[2]
+		if file == "" || file == "." || file == ".." ||
+			strings.ContainsAny(file, `/\\`) || filepath.Base(file) != file ||
+			!strings.HasSuffix(file, ".log") {
+			return "", fmt.Errorf("invalid log name")
+		}
+		c, err := e.Config.View()
+		if err != nil {
+			return "", err
+		}
+		site, ok := c.Sites[parts[1]]
+		if !ok || site.Path == "" {
+			return "", fmt.Errorf("unknown site %q", parts[1])
+		}
+		data, err := os.ReadFile(filepath.Join(site.Path, "storage", "logs", file))
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
 	if name == "" || strings.ContainsAny(name, `/\\`) || name == "." || name == ".." {
 		return "", fmt.Errorf("invalid log name")
 	}

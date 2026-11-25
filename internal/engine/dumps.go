@@ -30,6 +30,12 @@ type DumpsRequest struct {
 	Request    string   `json:"request,omitempty"`
 	Message    string   `json:"message,omitempty"`
 	Token      string   `json:"token,omitempty"`
+	Confirm    bool     `json:"confirm,omitempty"` // required for op=clear
+	// Correlation and timing for query analytics. Older agents omit them.
+	RequestID  string  `json:"request_id,omitempty"`
+	DurationMS float64 `json:"duration_ms,omitempty"`
+	SlowMS     float64 `json:"slow_ms,omitempty"`     // 0 = default 100 ms
+	MinRepeats int     `json:"min_repeats,omitempty"` // 0 = default 5
 }
 
 // DumpsOptions is the persisted capture configuration.
@@ -44,21 +50,25 @@ type DumpsOptions struct {
 
 // DumpEvent is one line of a <site>.jsonl dump file.
 type DumpEvent struct {
-	ID      string `json:"id"`
-	Site    string `json:"site"`
-	Type    string `json:"type"`
-	Time    string `json:"time"`
-	Request string `json:"request,omitempty"`
-	Message string `json:"message"`
+	ID         string  `json:"id"`
+	Site       string  `json:"site"`
+	Type       string  `json:"type"`
+	Time       string  `json:"time"`
+	Request    string  `json:"request,omitempty"`
+	Message    string  `json:"message"`
+	RequestID  string  `json:"request_id,omitempty"`
+	DurationMS float64 `json:"duration_ms,omitempty"`
 }
 
 // DumpsResult is returned by every dumps operation.
 type DumpsResult struct {
-	Capturing bool         `json:"capturing"`
-	Options   DumpsOptions `json:"options"`
-	Count     int          `json:"count"`
-	Events    []DumpEvent  `json:"events,omitempty"`
-	Output    string       `json:"output,omitempty"`
+	Capturing bool              `json:"capturing"`
+	Options   DumpsOptions      `json:"options"`
+	Count     int               `json:"count"`
+	Events    []DumpEvent       `json:"events,omitempty"`
+	Insights  *DumpInsights     `json:"insights,omitempty"`
+	Timeline  []RequestTimeline `json:"timeline,omitempty"`
+	Output    string            `json:"output,omitempty"`
 }
 
 const (
@@ -162,6 +172,9 @@ func (e *Engine) DumpsControl(ctx context.Context, req DumpsRequest) (DumpsResul
 		}
 		out.Output = "Evento guardado (" + event.ID + ")"
 	case "clear":
+		if !req.Confirm {
+			return DumpsResult{}, fmt.Errorf("borrar los dumps requiere confirmación (confirm: true)")
+		}
 		if err := e.clearDumps(); err != nil {
 			return out, fmt.Errorf("clear dumps: %w", err)
 		}
@@ -172,6 +185,9 @@ func (e *Engine) DumpsControl(ctx context.Context, req DumpsRequest) (DumpsResul
 			return out, fmt.Errorf("list dumps: %w", err)
 		}
 		out.Events, out.Count = events, len(events)
+		insights := buildDumpInsights(events, req.SlowMS, req.MinRepeats)
+		out.Insights = &insights
+		out.Timeline = buildRequestTimeline(events)
 	}
 
 	if req.Op != "list" {
@@ -202,6 +218,7 @@ func (e *Engine) ingestDump(req DumpsRequest) (DumpEvent, error) {
 	event := DumpEvent{
 		ID: newDumpID(), Site: site, Type: typ, Time: when,
 		Request: req.Request, Message: req.Message,
+		RequestID: req.RequestID, DurationMS: req.DurationMS,
 	}
 	line, err := json.Marshal(event)
 	if err != nil {
@@ -216,11 +233,46 @@ func (e *Engine) ingestDump(req DumpsRequest) (DumpEvent, error) {
 	if err != nil {
 		return DumpEvent{}, fmt.Errorf("open dump file: %w", err)
 	}
-	defer f.Close()
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return DumpEvent{}, fmt.Errorf("append event: %w", err)
 	}
-	return event, nil
+	if err := f.Close(); err != nil {
+		return DumpEvent{}, err
+	}
+	// Keep the on-disk feed bounded: old dumps have no diagnostic value once a
+	// session is over and large HTML payloads would grow without limit.
+	return event, trimDumpFile(filepath.Join(e.dumpsPath(), site+".jsonl"))
+}
+
+const (
+	maxDumpEvents = 500
+	maxDumpBytes  = 5 << 20
+)
+
+// trimDumpFile keeps only the most recent events when a site's dump file
+// grows past the retention budget. Writes are atomic so readers never see a
+// partially rewritten feed.
+func trimDumpFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if len(data) <= maxDumpBytes {
+		return nil
+	}
+	lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+	if len(lines) > maxDumpEvents {
+		lines = lines[len(lines)-maxDumpEvents:]
+	}
+	render := func() string { return strings.Join(lines, "\n") + "\n" }
+	for len(render()) > maxDumpBytes && len(lines) > 1 {
+		lines = lines[1:]
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(render()), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (e *Engine) allDumps() ([]DumpEvent, error) {
@@ -295,7 +347,8 @@ func (e *Engine) listDumps(req DumpsRequest) ([]DumpEvent, error) {
 	}
 	sort.SliceStable(filtered, func(i, j int) bool { return filtered[i].Time > filtered[j].Time })
 	if len(filtered) > dumpsMaxEvents {
-		filtered = filtered[len(filtered)-dumpsMaxEvents:]
+		// Sorted newest first: keep the newest events, not the oldest ones.
+		filtered = filtered[:dumpsMaxEvents]
 	}
 	return filtered, nil
 }
@@ -401,9 +454,12 @@ $lairHome = %s;
 $lairToken = %s;
 
 if (!function_exists('lair_dumps_send')) {
-    function lair_dumps_send($type, $message, $request = '')
+    function lair_dumps_send($type, $message, $request = '', $requestID = '', $durationMs = 0)
     {
         global $lairBin, $lairHome, $lairToken;
+        if ($requestID === '') {
+            $requestID = isset($_SERVER['LAIR_DUMPS_REQUEST_ID']) ? (string) $_SERVER['LAIR_DUMPS_REQUEST_ID'] : '';
+        }
         $site = getenv('LAIR_DUMPS_SITE');
         if (!$site) { $site = getenv('LAIR_SITE'); }
         if (!$site) { $site = basename((string) getcwd()); }
@@ -413,6 +469,8 @@ if (!function_exists('lair_dumps_send')) {
             '--type', (string) $type,
             '--time', gmdate('c'),
             '--request', (string) $request,
+            '--request-id', (string) $requestID,
+            '--duration-ms', (string) $durationMs,
             '--message', (string) $message,
             '--token', trim((string) @file_get_contents($lairToken)),
         );
@@ -476,6 +534,13 @@ try {
     if (class_exists('Illuminate\Support\Facades\Event')) {
         \Illuminate\Support\Facades\Event::listen('Illuminate\Log\Events\MessageLogged', function ($event) {
             lair_dumps_send('logs', (string) (isset($event->message) ? $event->message : ''), '');
+        });
+        // QueryExecuted is what makes the query insights possible: raw SQL
+        // plus its duration, correlated with the current request.
+        \Illuminate\Support\Facades\Event::listen('Illuminate\Database\Events\QueryExecuted', function ($event) {
+            $req = isset($_SERVER['REQUEST_URI']) ? (string) $_SERVER['REQUEST_URI'] : '';
+            $ms = isset($event->time) ? (float) $event->time : 0;
+            lair_dumps_send('queries', (string) (isset($event->sql) ? $event->sql : ''), $req, '', $ms);
         });
     }
 } catch (\Throwable $e) {

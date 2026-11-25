@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ACTIONS, DaemonError, FakeDaemon, HttpDaemonClient, jobProgress, toComponentJob } from '../index';
+import { ACTIONS, DaemonError, FakeDaemon, HttpDaemonClient, jobProgress, projectProgress, toComponentJob } from '../index';
 
 function mockFetch(body: unknown, status = 200) {
   return vi.fn(async () => ({
@@ -130,6 +130,13 @@ describe('progreso de jobs', () => {
     expect(jobProgress({ downloaded: -1, total: 100 })).toBeNull();
     expect(jobProgress({})).toBeNull();
 
+    expect(projectProgress('', {})).toBe(5);
+    const early = projectProgress('Creating Laravel application...', {});
+    const middle = projectProgress('Creating Laravel application...\nSetting up frontend dependencies with npm...', {});
+    expect(early).toBeGreaterThan(5);
+    expect(middle).toBeGreaterThan(early);
+    expect(projectProgress('Proyecto listo: blog.test', { done: true })).toBe(100);
+
     expect(toComponentJob({ phase: 'downloading', downloaded: 42, total: 100 })).toMatchObject({
       state: 'running',
       phase: 'downloading',
@@ -192,12 +199,14 @@ describe('FakeDaemon', () => {
     await expect(fake.call(ACTIONS.mail, { op: 'start' })).resolves.toMatchObject({ running: true });
     const found = await fake.call<{ message?: { subject?: string } }>(ACTIONS.mail, { op: 'message', id: 'msg-1001' });
     expect(found.message).toMatchObject({ subject: 'Welcome to your new site' });
-    await expect(fake.call(ACTIONS.mail, { op: 'clear' })).resolves.toMatchObject({ count: 0 });
+    await expect(fake.call(ACTIONS.mail, { op: 'clear' })).rejects.toThrow(/confirmación/);
+    await expect(fake.call(ACTIONS.mail, { op: 'clear', confirm: true })).resolves.toMatchObject({ count: 0 });
 
     await expect(fake.call(ACTIONS.dumps, { op: 'capture-on' })).resolves.toMatchObject({ capturing: true });
     const updated = await fake.call<{ options?: Record<string, boolean> }>(ACTIONS.dumps, { op: 'options', types: ['queries'], show_in_page: true });
     expect(updated.options).toMatchObject({ queries: true, logs: false, show_in_page: true });
-    await expect(fake.call(ACTIONS.dumps, { op: 'clear' })).resolves.toMatchObject({ count: 0 });
+    await expect(fake.call(ACTIONS.dumps, { op: 'clear' })).rejects.toThrow(/confirmación/);
+    await expect(fake.call(ACTIONS.dumps, { op: 'clear', confirm: true })).resolves.toMatchObject({ count: 0 });
 
     await expect(fake.call(ACTIONS.debugger, { op: 'detect-on' })).resolves.toMatchObject({ detect: true });
     await expect(fake.call(ACTIONS.debugger, { op: 'breakpoints-on' })).resolves.toMatchObject({ breakpoints: true });
@@ -359,6 +368,23 @@ describe('FakeDaemon', () => {
     ]);
   });
 
+  it('projectInfo desenvuelve el campo info del daemon', async () => {
+    const fetchImpl = mockFetch({
+      ok: true,
+      data: {
+        info: {
+          projects_dir: '/home/dev/Lair',
+          default_database: 'mariadb',
+          databases: ['sqlite', 'mariadb'],
+        },
+      },
+    });
+    const client = new HttpDaemonClient('http://127.0.0.1:9797', 'token', fetchImpl);
+    const info = await client.projectInfo();
+    expect(info.projects_dir).toBe('/home/dev/Lair');
+    expect(info.default_database).toBe('mariadb');
+  });
+
   it('mantiene el estado mutable de las carpetas de proyectos en el FakeDaemon', async () => {
     const fake = new FakeDaemon();
     expect((await fake.projectDirs()).dirs).toEqual(['/home/dev/Lair']);
@@ -384,7 +410,7 @@ describe('FakeDaemon', () => {
     expect(imported.dirs).toContain('/home/dev/.valet/Sites');
   });
 
-  it('cubre la paridad de acciones con la TUI', async () => {
+  it('cubre la paridad de acciones con la CLI', async () => {
     const fake = new FakeDaemon();
     const parked = await fake.call<{ text: string }>(ACTIONS.park, { path: '/srv/acme' });
     expect(parked.text).toBe('acme.test');

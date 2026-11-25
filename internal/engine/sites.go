@@ -74,6 +74,27 @@ func (e *Engine) Unlink(name string) error {
 	return nil
 }
 
+// siteIsSecure reports whether a site must be served over HTTPS. Older config
+// entries (and newly linked sites) have no flag yet and keep the historical
+// default: HTTPS on. An explicit false is the only way to turn it off.
+func (e *Engine) siteIsSecure(name string, site config.Site) bool {
+	if site.Secure != nil {
+		return *site.Secure
+	}
+	return true
+}
+
+// setSiteSecure persists the per-site HTTPS flag. syncWeb must not re-issue a
+// certificate once the user has turned HTTPS off.
+func (e *Engine) setSiteSecure(name string, on bool) error {
+	return e.Config.Update(func(c *config.Config) error {
+		site := c.Sites[name]
+		site.Secure = &on
+		c.Sites[name] = site
+		return nil
+	})
+}
+
 // Secure ensures the local CA exists and issues a certificate for the site.
 // The CA still needs to be trusted via the one-time privileged setup.
 func (e *Engine) Secure(name string) error {
@@ -95,6 +116,9 @@ func (e *Engine) Secure(name string) error {
 	if err != nil {
 		return err
 	}
+	if err := e.setSiteSecure(name, true); err != nil {
+		return err
+	}
 	e.reloadSites()
 	e.syncWeb()
 	return nil
@@ -110,6 +134,9 @@ func (e *Engine) SetSiteHTTPS(name string, on bool) error {
 	if on {
 		return e.Secure(name)
 	}
+	if err := e.setSiteSecure(name, false); err != nil {
+		return err
+	}
 	cert := filepath.Join(e.Paths.Certs, name+".pem")
 	key := filepath.Join(e.Paths.Certs, name+"-key.pem")
 	if err := os.Remove(cert); err != nil && !os.IsNotExist(err) {
@@ -119,6 +146,7 @@ func (e *Engine) SetSiteHTTPS(name string, on bool) error {
 		return err
 	}
 	e.Web.Router.SetSecure(name, false)
+	e.reloadSites()
 	e.syncWeb()
 	return nil
 }

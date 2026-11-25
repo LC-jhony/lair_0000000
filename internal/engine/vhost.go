@@ -33,6 +33,7 @@ var (
 type vhostSite struct {
 	Name      string
 	Root      string
+	DocRoot   string
 	PHPSocket string
 	Cert      string
 	Key       string
@@ -66,7 +67,11 @@ func renderVHost(s config.WebSettings, site vhostSite) (string, error) {
 		pages = "pages"
 	}
 	ready := site.RootState == "ok"
-	root := q(filepath.Join(site.Root, "public"))
+	docRoot := site.DocRoot
+	if docRoot == "" {
+		docRoot = filepath.Join(site.Root, "public")
+	}
+	root := q(docRoot)
 	index := "index.php index.html"
 	locations := location()
 	if !ready {

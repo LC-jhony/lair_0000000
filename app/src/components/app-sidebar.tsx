@@ -5,7 +5,9 @@ import {
   FileText,
   Globe2,
   Languages,
+  History,
   LayoutDashboard,
+  ListTodo,
   Mail,
   ReceiptText,
   RefreshCw,
@@ -43,6 +45,8 @@ const PANE_ICONS: Record<PaneId, LucideIcon> = {
   dumps: ReceiptText,
   debugger: BugPlay,
   logs: FileText,
+  jobs: ListTodo,
+  activity: History,
   system: Settings2,
 };
 

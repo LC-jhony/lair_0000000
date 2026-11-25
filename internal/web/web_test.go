@@ -39,23 +39,77 @@ func TestRouterMatch(t *testing.T) {
 	}
 }
 
+func TestRouterListIsSorted(t *testing.T) {
+	r := NewRouter()
+	for _, name := range []string{"zulu.test", "alpha.test", "mike.test"} {
+		if err := r.Add(Site{Name: name, Root: "/srv/" + name, PHPSocket: "/run/fpm.sock", Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		got := r.List()
+		if len(got) != 3 || got[0].Name != "alpha.test" || got[1].Name != "mike.test" || got[2].Name != "zulu.test" {
+			t.Fatalf("List() = %v", got)
+		}
+	}
+}
+
+func TestFastCGIParamsUsesProfileDocRoot(t *testing.T) {
+	site := Site{Name: "blog.test", Root: "/srv/blog", PHPSocket: "/run/fpm.sock",
+		DocRoot: "/srv/blog", FrontController: "index.php"}
+	req := httptest.NewRequest(http.MethodGet, "http://blog.test/contacto", nil)
+	p := FastCGIParams(site, "blog.test", req)
+	if p["SCRIPT_FILENAME"] != filepath.Join("/srv/blog", "index.php") {
+		t.Fatalf("script = %q", p["SCRIPT_FILENAME"])
+	}
+}
+
 func TestFastCGIParams(t *testing.T) {
 	site := Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock", Enabled: true}
 	req := httptest.NewRequest(http.MethodPost, "http://acme.test/foo?a=1", strings.NewReader("x=1"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	p := FastCGIParams(site, "www.acme.test", req)
 	if p["SCRIPT_FILENAME"] != filepath.Join("/srv/acme", "public", "index.php") {
 		t.Fatalf("SCRIPT_FILENAME = %s", p["SCRIPT_FILENAME"])
 	}
-	if p["SCRIPT_NAME"] != "foo" || p["REQUEST_METHOD"] != "POST" || p["QUERY_STRING"] != "a=1" {
+	if p["SCRIPT_NAME"] != "/index.php" || p["PATH_INFO"] != "/foo" || p["REQUEST_METHOD"] != "POST" || p["QUERY_STRING"] != "a=1" {
 		t.Fatalf("params = %+v", p)
+	}
+	// Real PHP files keep their own absolute script name, no PATH_INFO.
+	installer := httptest.NewRequest(http.MethodGet, "http://acme.test/installation/index.php", nil)
+	pi := FastCGIParams(site, "acme.test", installer)
+	if pi["SCRIPT_NAME"] != "/installation/index.php" || pi["PATH_INFO"] != "" {
+		t.Fatalf("installer params = %+v", pi)
 	}
 	if p["SERVER_NAME"] != "www.acme.test" || p["SERVER_PORT"] != "80" {
 		t.Fatalf("server params = %+v", p)
+	}
+	if p["CONTENT_TYPE"] != "application/x-www-form-urlencoded" || p["CONTENT_LENGTH"] != "3" {
+		t.Fatalf("POST params = %+v", p)
 	}
 	req2 := httptest.NewRequest(http.MethodGet, "http://acme.test/style.css", nil)
 	p2 := FastCGIParams(site, "acme.test", req2)
 	if !strings.HasSuffix(p2["SCRIPT_FILENAME"], filepath.Join("public", "style.css")) {
 		t.Fatalf("static script = %s", p2["SCRIPT_FILENAME"])
+	}
+}
+
+func TestFastCGIParamsPrefersDirectoryFrontController(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "installation"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "installation", "index.php"), []byte("<?php"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	site := Site{Name: "cms.test", Root: root, DocRoot: root, FrontController: "index.php"}
+	req := httptest.NewRequest(http.MethodPost, "http://cms.test/installation/?task=installation.dbcheck", nil)
+	p := FastCGIParams(site, "cms.test", req)
+	if want := filepath.Join(root, "installation", "index.php"); p["SCRIPT_FILENAME"] != want {
+		t.Fatalf("script = %q, want %q", p["SCRIPT_FILENAME"], want)
+	}
+	if p["SCRIPT_NAME"] != "/installation/index.php" || p["PATH_INFO"] != "" {
+		t.Fatalf("params = %+v", p)
 	}
 }
 
@@ -104,7 +158,7 @@ func TestHandlerProxiesToFPM(t *testing.T) {
 func TestGetCertificate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "certs")
 	s := NewServer(dir, "test")
-	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock", Enabled: true}); err != nil {
+	if err := s.Router.Add(Site{Name: "acme.test", Root: "/srv/acme", PHPSocket: "/run/fpm.sock", Enabled: true, Secure: true}); err != nil {
 		t.Fatal(err)
 	}
 	cert, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "www.acme.test"})
@@ -146,7 +200,7 @@ func TestGetCertificateRejectsUnparkedSNI(t *testing.T) {
 		t.Fatalf("unparked host has a certificate: %v", err)
 	}
 	// After parking, the same SNI works and is cached.
-	if err := s.Router.Add(Site{Name: "ghost.test", Root: "/srv/ghost", PHPSocket: "/run/fpm.sock", Enabled: true}); err != nil {
+	if err := s.Router.Add(Site{Name: "ghost.test", Root: "/srv/ghost", PHPSocket: "/run/fpm.sock", Enabled: true, Secure: true}); err != nil {
 		t.Fatal(err)
 	}
 	first, err := s.getCertificate(&tls.ClientHelloInfo{ServerName: "ghost.test"})

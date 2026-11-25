@@ -74,6 +74,11 @@ func (c *Client) Do(req Request) (*Response, error) {
 	if err := writeChunks(c.Conn, paramsRecord, encodeParams(req.Params)); err != nil {
 		return nil, fmt.Errorf("send params: %w", err)
 	}
+	// PHP-FPM ignores FCGI_STDIN until an empty FCGI_PARAMS record terminates
+	// the parameter stream. Without it POST bodies never reach the script.
+	if err := writeRecord(c.Conn, paramsRecord, nil); err != nil {
+		return nil, fmt.Errorf("send params EOF: %w", err)
+	}
 	if err := writeChunks(c.Conn, stdinRecord, req.Body); err != nil {
 		return nil, fmt.Errorf("send stdin: %w", err)
 	}

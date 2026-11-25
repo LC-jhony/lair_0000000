@@ -76,7 +76,7 @@ describe('inspector avanzado de Sites', () => {
     await waitFor(() => expect(screen.getByText('Laravel')).toBeTruthy());
     const tabs = screen.getAllByRole('tab');
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      'Overview', 'Environment', 'Database', 'Mail', 'Queues', 'PHP & Node.js', 'Logs',
+      'Overview', 'Environment', 'Database', 'Mail', 'Queues', 'Stack', 'Data', 'PHP & Node.js', 'Logs',
     ]);
     expect(screen.getByText(/blog\.test:(8080|8443)/)).toBeTruthy();
   });
@@ -95,6 +95,25 @@ describe('inspector avanzado de Sites', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'New value APP_DEBUG' }), { target: { value: 'false' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save value APP_DEBUG' }));
     await waitFor(() => expect(site).toHaveBeenCalledWith({ op: 'env-set', name: 'blog.test', key: 'APP_DEBUG', value: 'false' }));
+  });
+
+  it('muestra los valores del .env y revela la contraseña con el botón ojo', async () => {
+    const daemon = new FakeDaemon({ fixture: demoFixture });
+    const site = vi.spyOn(daemon, 'site');
+    await openDetails(daemon);
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Environment' }));
+    // Non-secret values are visible in the inputs, secrets are not.
+    expect(screen.getAllByDisplayValue('local').length).toBeGreaterThan(0);
+    expect(document.body.textContent).not.toContain('demo-secret-key-do-not-show');
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Database' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show password' }));
+    await waitFor(() => expect(site).toHaveBeenCalledWith({
+      op: 'env', name: 'blog.test', key: 'DB_PASSWORD', reveal: true,
+    }));
+    expect(screen.getByDisplayValue('demo-db-secret')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Hide password' })).toBeTruthy();
   });
 
   it('navega a Mail y Logs desde las pestañas correspondientes', async () => {

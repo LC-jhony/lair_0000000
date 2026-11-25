@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Dialog, Input, Progress, Select, Switch } from '../components';
-import { jobProgress, type DaemonClient, type JobStatus, type ProjectCreatePayload, type ProjectInfo } from '../api';
+import { projectProgress, type DaemonClient, type JobStatus, type ProjectCreatePayload, type ProjectInfo } from '../api';
 import { useT } from '../i18n';
 import type { LairController } from '../useLair';
 
@@ -57,6 +57,7 @@ export function ProjectDialog({ open, onClose, state }: Props) {
   const [jobID, setJobID] = useState('');
   const [job, setJob] = useState<JobStatus>({});
   const [log, setLog] = useState('');
+  const [tick, setTick] = useState(0);
   const [site, setSite] = useState('');
   const [error, setError] = useState('');
   // Keeps the submitted credentials available for Retry after we clear the
@@ -81,27 +82,41 @@ export function ProjectDialog({ open, onClose, state }: Props) {
   useEffect(() => {
     if (!open || !state.client) return;
     let alive = true;
-    void state.client.projectInfo().then((result) => {
-      if (!alive) return;
-      setInfo(result);
-      // The daemon owns the default folder: use it unless the user already
-      // typed a parent. Never default to the current directory or LAIR_HOME.
-      const projectsDir = result.projects_dir?.trim();
-      const preferredDB = result.default_database?.trim();
-      setForm((prev) => {
-        const next = { ...prev };
-        if (projectsDir && !next.parent.trim()) next.parent = projectsDir;
-        if (preferredDB && result.databases?.includes(preferredDB)) {
-          next.database = preferredDB as Form['database'];
-          if (next.dbUser === 'root' || !next.dbUser.trim()) next.dbUser = DB_USER[preferredDB] ?? 'root';
-          if (!next.dbPort.trim()) {
-            next.dbPort = String(state.status?.services?.[preferredDB]?.port ?? DB_PORT[preferredDB] ?? '');
+    let retry = 0;
+    const load = async (): Promise<boolean> => {
+      try {
+        const result = await state.client!.projectInfo();
+        if (!alive) return true;
+        setInfo(result);
+        // The daemon owns the default folder: use it unless the user already
+        // typed a parent. Never default to the current directory or LAIR_HOME.
+        const projectsDir = result.projects_dir?.trim();
+        const preferredDB = result.default_database?.trim();
+        setForm((prev) => {
+          const next = { ...prev };
+          if (projectsDir && !next.parent.trim()) next.parent = projectsDir;
+          if (preferredDB && result.databases?.includes(preferredDB)) {
+            next.database = preferredDB as Form['database'];
+            if (next.dbUser === 'root' || !next.dbUser.trim()) next.dbUser = DB_USER[preferredDB] ?? 'root';
+            if (!next.dbPort.trim()) {
+              next.dbPort = String(state.status?.services?.[preferredDB]?.port ?? DB_PORT[preferredDB] ?? '');
+            }
           }
-        }
-        return next;
-      });
-    }).catch(() => undefined);
-    return () => { alive = false; };
+          return next;
+        });
+        return true;
+      } catch {
+        return false; // daemon may still be starting: retry below
+      }
+    };
+    void load().then((ok) => {
+      if (!ok && alive) {
+        retry = window.setInterval(() => {
+          void load().then((done) => { if (done) window.clearInterval(retry); });
+        }, 1000);
+      }
+    });
+    return () => { alive = false; window.clearInterval(retry); };
   }, [open, state.client]);
 
   useEffect(() => {
@@ -138,6 +153,7 @@ export function ProjectDialog({ open, onClose, state }: Props) {
     setJobID('');
     setJob({});
     setLog('');
+    setTick(0);
     setSite('');
     setError('');
     lastPayloadRef.current = null;
@@ -164,6 +180,7 @@ export function ProjectDialog({ open, onClose, state }: Props) {
   };
 
   const start = async (client: DaemonClient, payload: ProjectCreatePayload) => {
+    setTick(0);
     try {
       const result = await client.projectCreate(payload);
       setJobID(result.id ?? '');
@@ -219,7 +236,19 @@ export function ProjectDialog({ open, onClose, state }: Props) {
   const options = (values: readonly string[]) => values.map((value) => ({ value, label: value }));
   const failed = Boolean(job.error || job.canceled);
   const running = Boolean(jobID) && !job.done && !failed;
-  const progress = jobProgress(job);
+
+  // Advance slowly while a stage is running (e.g. npm install).
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setTick((value) => Math.min(10, value + 1)), 1500);
+    return () => window.clearInterval(timer);
+  }, [running]);
+
+  // Stage-based progress from the installer log, with a gentle creep between
+  // stages (npm install can be long) so the bar keeps moving.
+  const stageProgress = projectProgress(log, job);
+  const progress = failed ? 100 : job.done ? 100 : Math.min(96, stageProgress + Math.min(10, tick));
+  const tone = failed ? 'danger' : progress >= 100 ? 'success' : progress >= 50 ? 'warning' : 'danger';
   const steps = [t('project.stepProject'), t('project.stepInterface'), t('project.stepTools'), t('project.stepDatabase')];
   const databases = info.databases?.length ? info.databases : ['sqlite', 'mysql', 'mariadb', 'pgsql', 'sqlsrv'];
   const nodeManagers = info.node_managers?.length
@@ -280,7 +309,7 @@ export function ProjectDialog({ open, onClose, state }: Props) {
 
       {running || site || failed ? (
         <div className="flex flex-col gap-4">
-          <Progress value={(progress ?? 0) * 100} label={failed ? t('project.failed') : t('project.creating')} />
+          <Progress value={progress} tone={tone} label={failed ? t('project.failed') : t('project.creating')} />
           {failed ? (
             <div role="alert" className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">
               <p className="font-medium">{job.canceled ? t('project.canceled') : t('project.failed')}</p>
@@ -289,7 +318,9 @@ export function ProjectDialog({ open, onClose, state }: Props) {
           ) : (
             <p className="text-sm text-muted-foreground">{site ? `${t('project.success')} ${site}` : t('project.creating')}</p>
           )}
-          <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">{log || t('project.waitingLog')}</pre>
+          {failed && (
+            <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">{log || t('project.waitingLog')}</pre>
+          )}
         </div>
       ) : (
         <>

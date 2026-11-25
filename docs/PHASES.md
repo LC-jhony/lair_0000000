@@ -48,16 +48,16 @@ Tests: API con token (incluye rechazo de unauthorized), DNS codec/servidor, PKI,
 - Se elimina la SPA embebida (`internal/ui`). `internal/desktopapi` publica solo `POST /api` en `127.0.0.1:9797`: token en la cabecera `X-Lair-Token` (comparación en tiempo constante), sin query ni fragmento, CORS restringido a orígenes locales/Electron y sin HTML/CSS/JS.
 - `app/` contiene la app Electron + React + TypeScript: shell con sidebar, componentes base, tema claro/oscuro, i18n en/es/cs, cliente del bridge y `FakeDaemon` con fixtures. El renderer recibe URL y token por IPC (`contextIsolation`), sin filesystem.
 - `lair desktop` (alias `lair ui`) arranca el daemon si hace falta y lee `run/desktop.url` y `run/desktop.token` (`0600`). El `.deb` instala el lanzador `.desktop` y el icono.
-- Se mantiene la paridad de acciones con la CLI y la TUI; `app/scripts/check-actions.mjs` falla si el cliente declara una acción ausente en `internal/daemon/protocol.go`.
+- Se mantiene la paridad de acciones con la CLI; `app/scripts/check-actions.mjs` falla si el cliente declara una acción ausente en `internal/daemon/protocol.go`.
 - Tests: autenticación, CORS, llamadas al `Dispatcher` y ausencia de interfaz estática.
 
 ## Fase 6 — Web configurable, proyectos Laravel y calidad
 
 - `internal/web` genera los hosts virtuales de los sitios aparcados en el servidor Go integrado, con FastCGI a PHP-FPM y certificados de la CA local (SNI restringido a sitios aparcados). Los cambios se aplican en caliente desde `config.json`, sin archivos de configuración externos que validar; **no se instala ningún servidor web**.
-- Un único action `web` configura puertos HTTP/HTTPS (8080/8443 por defecto), HTTPS, `domain` y `bind` para desktop, TUI y CLI. El servidor Go respeta `bind`: `0.0.0.0` expone la LAN, `127.0.0.1` es el aislado por defecto.
-- `internal/project` implementa la acción `project` compartida: `lair project info` / `lair project new` y los asistentes de desktop y TUI. `laravel/installer` se aísla en `COMPOSER_HOME`; credenciales por `DB_*`, nunca en argv ni en logs. SQL Server no es gestionado por Lair: se documenta la limitación (solo se escriben credenciales en `.env`).
+- Un único action `web` configura puertos HTTP/HTTPS (8080/8443 por defecto), HTTPS, `domain` y `bind` para desktop y CLI. El servidor Go respeta `bind`: `0.0.0.0` expone la LAN, `127.0.0.1` es el aislado por defecto.
+- `internal/project` implementa la acción `project` compartida: `lair project info` / `lair project new` y el asistente de la desktop. `laravel/installer` se aísla en `COMPOSER_HOME`; credenciales por `DB_*`, nunca en argv ni en logs. SQL Server no es gestionado por Lair: se documenta la limitación (solo se escriben credenciales en `.env`).
 - `internal/nvm` carga `nvm.sh` con argv validado; toda gestión de Node pasa por `lair nvm ...`, sin `curl | bash` automático.
-- Internacionalización completa (en/es/cs) con `npm run i18n:check`, TUI Charm v2 con ayuda Glamour y grabación VHS, y correcciones de timeouts y filtrado de stderr de PHP-FPM.
+- Internacionalización completa (en/es/cs) con `npm run i18n:check` y correcciones de timeouts y filtrado de stderr de PHP-FPM.
 - Calidad: CI en `.github/workflows/ci.yml` (Go + app con Node 22, sin publicar releases), `.golangci.yml`, `make lint` y `make coverage`, ADRs en `docs/adr/` y documentación (README, SECURITY, CLI, ARCHITECTURE) reconciliada.
 
 Tests: enrutado web y hosts virtuales, web settings (bind, puertos y dominio), acción `project`, nvm con argv, i18n y paridad de acciones.

@@ -228,7 +228,7 @@ export function MailPane({ state }: PaneProps) {
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirmClear(false)}>{t('common.cancel')}</Button>
-            <Button variant="danger" disabled={busyAll} onClick={() => void run({ op: 'clear' })}>
+            <Button variant="danger" disabled={busyAll} onClick={() => void run({ op: 'clear', confirm: true })}>
               <Trash2 className="size-3.5" aria-hidden="true" />
               {t('common.clear')}
             </Button>

@@ -36,6 +36,38 @@ type Config struct {
 	Mail        MailSettings     `json:"mail"`
 	Dumps       DumpsSettings    `json:"dumps"`
 	Debugger    DebuggerSettings `json:"debugger"`
+	// Snapshots configures database snapshots. Auto is off by default to
+	// avoid creating files without consent; Keep bounds the retention.
+	Snapshots SnapshotSettings `json:"snapshots,omitempty"`
+	// Worktrees configures automatic provisioning. Off by default so Lair
+	// never writes a site for a branch without the user opting in.
+	Worktrees WorktreeSettings `json:"worktrees,omitempty"`
+}
+
+// WorktreeSettings persists the worktree policy. Configured distinguishes an
+// older config.json from one that explicitly saved auto off.
+type WorktreeSettings struct {
+	Configured bool `json:"configured,omitempty"`
+	Auto       bool `json:"auto,omitempty"`
+	IsolateDB  bool `json:"isolate_db,omitempty"`
+}
+
+// DefaultWorktrees leaves automatic provisioning off; branch domains can
+// still be created explicitly with `lair worktree sync`.
+func DefaultWorktrees() WorktreeSettings { return WorktreeSettings{Configured: true} }
+
+// SnapshotSettings persists the snapshot policy. Configured distinguishes an
+// older config.json (no snapshots key) from one explicitly saved with auto off.
+type SnapshotSettings struct {
+	Configured bool   `json:"configured,omitempty"`
+	Auto       bool   `json:"auto,omitempty"`
+	Keep       int    `json:"keep,omitempty"`
+	Dir        string `json:"dir,omitempty"`
+}
+
+// DefaultSnapshots keeps five snapshots under <LAIR_HOME>/snapshots.
+func DefaultSnapshots() SnapshotSettings {
+	return SnapshotSettings{Configured: true, Auto: true, Keep: 5}
 }
 
 // MailSettings configures the built-in loopback SMTP catcher.
@@ -187,6 +219,15 @@ type Site struct {
 	Database string   `json:"database,omitempty"`
 	Domains  []string `json:"domains,omitempty"`
 	Enabled  bool     `json:"enabled,omitempty"`
+	// Secure is per-site HTTPS state. A pointer keeps an explicit false
+	// distinct from an older config entry that never had the field.
+	Secure *bool `json:"secure,omitempty"`
+	// Worktree marks a site provisioned from a git worktree. Lair only ever
+	// modifies or prunes sites carrying this marker.
+	Worktree     bool   `json:"worktree,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	GitCommonDir string `json:"git_common_dir,omitempty"`
+	DatabaseName string `json:"database_name,omitempty"`
 }
 
 // UnmarshalJSON defaults Enabled to true when the key is absent, so a
@@ -233,6 +274,8 @@ func New() *Config {
 		Mail:      DefaultMail(),
 		Dumps:     DefaultDumps(),
 		Debugger:  DefaultDebugger(),
+		Snapshots: DefaultSnapshots(),
+		Worktrees: DefaultWorktrees(),
 	}
 	c.Normalize()
 	return c
@@ -323,6 +366,12 @@ func Load(path string) (*Config, error) {
 	}
 	if c.Debugger.Mode == "" {
 		c.Debugger = DefaultDebugger()
+	}
+	if !c.Snapshots.Configured {
+		c.Snapshots = DefaultSnapshots()
+	}
+	if !c.Worktrees.Configured {
+		c.Worktrees = DefaultWorktrees()
 	}
 	return &c, nil
 }

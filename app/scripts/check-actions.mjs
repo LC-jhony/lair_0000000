@@ -1,5 +1,5 @@
-// Guards desktop/TUI parity: every action the desktop client declares must
-// exist in the daemon protocol, so a typo cannot silently diverge the UIs.
+// Guards desktop/CLI parity: every action the desktop client declares must
+// exist in the daemon protocol, so a typo cannot silently diverge the clients.
 import { readFileSync } from 'node:fs';
 
 const protocol = readFileSync(new URL('../../internal/daemon/protocol.go', import.meta.url), 'utf8');
@@ -31,10 +31,10 @@ if (missing.length > 0) {
 }
 
 // Reverse direction: a daemon action added for another front end must either
-// land in the desktop client or be explicitly documented as CLI/TUI-only.
+// land in the desktop client or be explicitly documented as CLI-only.
 const DAEMON_ONLY = new Set([
   'shutdown',
-  // CLI/TUI-only helpers not yet exposed by the desktop client.
+  // CLI-only helpers not yet exposed by the desktop client.
   'ext-add',
   'ext-required',
   'isolated',

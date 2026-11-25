@@ -1,8 +1,10 @@
 import type { IconName, Tone } from '../components';
 import type { LairController } from '../useLair';
+import { ActivityPane } from './ActivityPane';
 import { DatabasesPane } from './DatabasesPane';
 import { DebuggerPane } from './DebuggerPane';
 import { DumpsPane } from './DumpsPane';
+import { JobsPane } from './JobsPane';
 import { LogsPane } from './LogsPane';
 import { MailPane } from './MailPane';
 import { OverviewPane } from './OverviewPane';
@@ -22,7 +24,7 @@ export interface PaneDefinition {
   subtitleKey: string;
 }
 
-/** Mirrors the TUI panes so both interfaces expose the same functionality. */
+/** Panes exposed by the desktop app. */
 export const PANES: PaneDefinition[] = [
   { id: 'overview', icon: 'gear', color: 'gray', titleKey: 'pane.overview', subtitleKey: 'pane.overview.subtitle' },
   { id: 'runtimes', icon: 'code', color: 'indigo', titleKey: 'pane.runtimes', subtitleKey: 'pane.runtimes.subtitle' },
@@ -33,6 +35,8 @@ export const PANES: PaneDefinition[] = [
   { id: 'dumps', icon: 'dumps', color: 'teal', titleKey: 'pane.dumps', subtitleKey: 'pane.dumps.subtitle' },
   { id: 'debugger', icon: 'bug', color: 'purple', titleKey: 'pane.debugger', subtitleKey: 'pane.debugger.subtitle' },
   { id: 'logs', icon: 'log', color: 'cyan', titleKey: 'pane.logs', subtitleKey: 'pane.logs.subtitle' },
+  { id: 'jobs', icon: 'dumps', color: 'purple', titleKey: 'pane.jobs', subtitleKey: 'pane.jobs.subtitle' },
+  { id: 'activity', icon: 'dumps', color: 'cyan', titleKey: 'pane.activity', subtitleKey: 'pane.activity.subtitle' },
   { id: 'system', icon: 'info', color: 'neutral', titleKey: 'pane.system', subtitleKey: 'pane.system.subtitle' },
 ];
 
@@ -55,6 +59,10 @@ export function PaneContent({ id, state, onNavigate }: { id: PaneId; state: Lair
       return <DebuggerPane {...props} />;
     case 'logs':
       return <LogsPane {...props} />;
+    case 'jobs':
+      return <JobsPane {...props} />;
+    case 'activity':
+      return <ActivityPane {...props} />;
     case 'system':
       return <SystemPane {...props} />;
     default:

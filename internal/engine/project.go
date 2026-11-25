@@ -131,7 +131,7 @@ func (e *Engine) assertProjectsDir(dir string) error {
 }
 
 // ProjectControl implements the single `project` daemon action shared by the
-// desktop app, the TUI and the CLI. `info` is synchronous; `create` returns a
+// desktop app and the CLI. `info` is synchronous; `create` returns a
 // job that is polled with the existing `job`, `logs` and `job-cancel` actions.
 func (e *Engine) ProjectControl(ctx context.Context, op, dir string, req project.CreateRequest) (project.Result, error) {
 	return e.ProjectControlWith(ctx, project.ControlRequest{Op: op, Dir: dir, CreateRequest: req})
@@ -139,7 +139,7 @@ func (e *Engine) ProjectControl(ctx context.Context, op, dir string, req project
 
 // ProjectControlWith is the full form of the project action. It accepts the
 // flat {op, dir, from, to, ...} payload without adding a new daemon action:
-// the desktop app and the TUI keep talking to `project` only.
+// the desktop app keeps talking to `project` only.
 func (e *Engine) ProjectControlWith(ctx context.Context, req project.ControlRequest) (project.Result, error) {
 	op := strings.ToLower(strings.TrimSpace(req.Op))
 	if strings.TrimSpace(req.Dir) == "" {

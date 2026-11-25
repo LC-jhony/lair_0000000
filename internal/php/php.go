@@ -417,7 +417,7 @@ listen.owner = %s
 listen.group = %s
 listen.mode = 0600
 pm = ondemand
-pm.max_children = 8
+pm.max_children = 4
 pm.process_idle_timeout = 10s
 php_value[display_errors] = %s
 php_admin_value[error_log] = %s
@@ -449,7 +449,7 @@ daemonize = no
 listen = %s
 listen.mode = 0600
 pm = ondemand
-pm.max_children = 8
+pm.max_children = 4
 pm.process_idle_timeout = 10s
 `, log, sock), nil
 }

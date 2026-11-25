@@ -10,8 +10,8 @@ import (
 )
 
 // isTerminal reports whether f is an interactive TTY. A plain character-device
-// check is not enough: /dev/null is a character device too, and a TUI started
-// there fails while creating Bubble Tea's input reader.
+// check is not enough: /dev/null is a character device too, and an
+// interactive program started there cannot read input.
 func isTerminal(f *os.File) bool {
 	return isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 }

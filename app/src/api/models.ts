@@ -1,6 +1,27 @@
+/** One database snapshot returned by the `db` daemon action. */
+export interface SnapshotInfo {
+  id: string;
+  site: string;
+  database: string;
+  driver: string;
+  file: string;
+  bytes: number;
+  sha256: string;
+  created: string;
+  auto: boolean;
+}
+
+/** Result of the `db` daemon action (snapshots, restore, import and export). */
+export interface DBResult {
+  output?: string;
+  snapshots?: SnapshotInfo[];
+}
+
 /** A job snapshot from the daemon (installer.Status on the wire). */
 export interface JobStatus {
   id?: string;
+  package?: string;
+  version?: string;
   phase?: string;
   downloaded?: number;
   total?: number;
@@ -122,6 +143,8 @@ export interface SiteResult {
   output?: string;
   /** Browser URL returned by the `open` operation. */
   url?: string;
+  /** Only returned by an explicit `env` + `reveal` request for one key. */
+  value?: string;
 }
 
 export type SiteOp = 'detail' | 'env' | 'env-set' | 'domains' | 'delete' | 'set-enabled' | 'config' | 'open';
@@ -135,6 +158,8 @@ export interface SitePayload {
   /** New state for the `set-enabled` operation. */
   enabled?: boolean;
   delete_files?: boolean;
+  /** Explicit opt-in to read one masked value (`env` operation). */
+  reveal?: boolean;
 }
 
 export interface DNSStatus {
@@ -225,6 +250,8 @@ export interface MailPayload {
   id?: string;
   /** SMTP username selects the mailbox; empty means the default inbox. */
   inbox?: string;
+  /** Required by the daemon for op=clear; the dialog supplies it. */
+  confirm?: boolean;
 }
 
 export interface DumpsOptions {
@@ -244,7 +271,54 @@ export interface DumpEvent {
   time?: string;
   request?: string;
   message?: string;
+  request_id?: string;
+  duration_ms?: number;
   [key: string]: unknown;
+}
+
+export interface QueryStat {
+  fingerprint: string;
+  count: number;
+  total_ms: number;
+  max_ms: number;
+}
+
+export interface SlowQuery {
+  id: string;
+  site: string;
+  request_id?: string;
+  request?: string;
+  sql: string;
+  time: string;
+  duration_ms: number;
+}
+
+export interface NPlusOne {
+  fingerprint: string;
+  site: string;
+  request_id?: string;
+  request?: string;
+  sample_sql: string;
+  count: number;
+  total_ms: number;
+}
+
+export interface DumpInsights {
+  slow_queries: SlowQuery[];
+  n_plus_one: NPlusOne[];
+  queries: QueryStat[];
+  total_queries: number;
+}
+
+export interface RequestTimeline {
+  request_id: string;
+  site: string;
+  request?: string;
+  start: string;
+  end: string;
+  count: number;
+  duration_ms: number;
+  events: DumpEvent[];
 }
 
 export interface DumpsResult {
@@ -252,6 +326,8 @@ export interface DumpsResult {
   options?: DumpsOptions;
   count?: number;
   events?: DumpEvent[];
+  insights?: DumpInsights;
+  timeline?: RequestTimeline[];
   output?: string;
 }
 
@@ -268,6 +344,8 @@ export interface DumpsPayload {
   types?: string[];
   show_in_page?: boolean;
   site?: string;
+  /** Required by the daemon for op=clear; the dialog supplies it. */
+  confirm?: boolean;
 }
 
 export interface DebuggerVersion {
@@ -385,6 +463,88 @@ export function jobProgress(job: JobStatus): number | null {
   return ratio >= 0 && ratio <= 1 ? ratio : null;
 }
 
+// Stages emitted by Laravel's installer (and by Lair at the end). The log is
+// polled by the wizard, so its last visible stage is the real creation progress:
+// the daemon's download counters are indeterminate for project jobs (0 -> 1).
+const PROJECT_STAGES = [
+  'Creating Laravel application',
+  'Running database migrations',
+  'Setting up Pest',
+  'Setting up PHPUnit',
+  'Fixing test code style',
+  'Setting up frontend dependencies',
+  'Setting up Node dependencies',
+  'Application ready',
+  'Guardando la configuración',
+  'Registrando el sitio',
+  'Proyecto listo',
+];
+
+/** Percentage (0..100) of a project-creation job from its streamed log. */
+export function projectProgress(log: string, job: JobStatus): number {
+  if (job.done && !job.error && !job.canceled) return 100;
+  let last = -1;
+  for (let i = 0; i < PROJECT_STAGES.length; i++) {
+    if (log.includes(PROJECT_STAGES[i])) last = i;
+  }
+  if (last < 0) return job.done ? 100 : 5;
+  if (log.includes('Proyecto listo')) return 100;
+  return Math.min(96, Math.round(((last + 1) / PROJECT_STAGES.length) * 100));
+}
+
+/** Read-only technologies used by a parked project (no credentials). */
+export interface SiteStack {
+  site?: string;
+  framework?: string;
+  framework_version?: string;
+  database?: string;
+  database_name?: string;
+  database_host?: string;
+  database_port?: number;
+  cache?: string;
+  web_root?: string;
+  front_controller?: string;
+  php?: string;
+  node?: string;
+  server?: string;
+  components?: string[];
+  error?: string;
+}
+
+/** One table's row count (no row values are exposed). */
+export interface TableInfo {
+  name?: string;
+  rows?: number;
+  error?: string;
+}
+
+/** Secret-free data overview of a Laravel site. */
+export interface SiteData {
+  site?: string;
+  tables?: TableInfo[];
+  cache_keys?: number;
+  mail?: number;
+  error?: string;
+}
+
+/** Result of a live probe against an installed service. */
+export interface ServiceHealth {
+  id?: string;
+  healthy?: boolean;
+  detail?: string;
+}
+
+/** Read-only queue snapshot for a parked Laravel site. */
+export interface QueueInfo {
+  site?: string;
+  driver?: string;
+  pending?: number;
+  failed?: number;
+  worker?: string;
+  hint?: string;
+  error?: string;
+}
+
 /** Adapts the daemon job to the UI contract used by the job components. */
 export function toComponentJob(job: JobStatus, action: 'install' | 'update' = 'install'): ComponentJobView {
   const failed = Boolean(job.error) || Boolean(job.canceled);
@@ -413,6 +573,10 @@ export interface DaemonClient {
   installService(id: string, version: string, port?: number): Promise<JobStatus>;
   job(id: string, signal?: AbortSignal): Promise<JobStatus>;
   jobs(): Promise<JobStatus[]>;
+  queue(name: string): Promise<QueueInfo>;
+  servicesHealth(): Promise<ServiceHealth[]>;
+  siteData(name: string): Promise<SiteData>;
+  siteStack(name: string): Promise<SiteStack>;
   cancelJob(id: string): Promise<{ canceled?: boolean }>;
   log(name: string): Promise<string>;
   logsList(): Promise<string[]>;
@@ -430,6 +594,7 @@ export interface DaemonClient {
   uninstallService(id: string, version: string, deleteData?: boolean): Promise<void>;
   ensureDatabase(): Promise<JobStatus & { already_installed?: boolean }>;
   createDB(id: string, name: string): Promise<string>;
+  db(payload: Record<string, unknown>): Promise<DBResult>;
   setDefaultDB(id: string): Promise<void>;
   park(path: string): Promise<string>;
   link(name: string, path: string): Promise<void>;

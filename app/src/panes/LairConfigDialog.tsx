@@ -69,7 +69,7 @@ export function LairConfigDialog({
   }, []);
 
   // Polling replaces `web` every few seconds; reset the draft only when a real
-  // value changes (for example after applying or after a TUI/CLI change).
+  // value changes (for example after applying or after a CLI change).
   const webSignature = web ? JSON.stringify(web) : '';
   useEffect(() => {
     if (!web || !state.client) return;

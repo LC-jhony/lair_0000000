@@ -121,7 +121,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Static files in public/ are served directly. Only dynamic routes reach
 	// PHP-FPM. Requests are rejected if the cleaned path escapes public/.
-	docRoot := filepath.Join(site.Root, "public")
+	docRoot := site.DocumentRoot()
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		if rel := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/"); rel != "" {
 			// Every .php file is a dynamic route, not a static asset. Serving
@@ -154,6 +154,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := &fastcgi.Client{Conn: conn, Timeout: s.timeout()}
 	params := FastCGIParams(site, serverName, r)
 	body, _ := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	// ContentLength is -1 for chunked requests; the body is already buffered,
+	// so advertise its real size to PHP in every case.
+	if len(body) > 0 {
+		params["CONTENT_LENGTH"] = fmt.Sprintf("%d", len(body))
+	}
 	resp, err := client.Do(fastcgi.Request{Params: params, Body: body})
 	if err != nil {
 		http.Error(w, "lair: FastCGI error: "+err.Error(), http.StatusBadGateway)
@@ -253,6 +258,9 @@ func (s *Server) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, e
 	site, _, ok := s.Router.Match(host)
 	if !ok {
 		return nil, fmt.Errorf("refusing to issue certificate for unparked host %q", host)
+	}
+	if !site.Secure {
+		return nil, fmt.Errorf("refusing to issue certificate for host %q: HTTPS is off", host)
 	}
 	canonical := pki.NormalizeHost(site.Name)
 

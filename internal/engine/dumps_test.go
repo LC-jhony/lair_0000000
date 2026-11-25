@@ -88,7 +88,10 @@ func TestDumpsOptionsIngestListAndClear(t *testing.T) {
 		t.Fatal("unknown op accepted")
 	}
 
-	cleared, err := e.DumpsControl(ctx, DumpsRequest{Op: "clear"})
+	if _, err := e.DumpsControl(ctx, DumpsRequest{Op: "clear"}); err == nil {
+		t.Fatal("clear without confirm accepted")
+	}
+	cleared, err := e.DumpsControl(ctx, DumpsRequest{Op: "clear", Confirm: true})
 	if err != nil {
 		t.Fatal(err)
 	}

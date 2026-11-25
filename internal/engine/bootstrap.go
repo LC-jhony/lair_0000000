@@ -85,7 +85,7 @@ func (e *Engine) ComposerVersion() string {
 
 // EnsureShims regenerates the shims and the PATH snippets using this engine's
 // data root. Unlike Bootstrap it never touches the network or the CA, so it is
-// safe to call after every install from the CLI, the TUI or the desktop app.
+// safe to call after every install from the CLI or the desktop app.
 func (e *Engine) EnsureShims(lairBinary, home string) (string, error) {
 	if err := e.Paths.Ensure(); err != nil {
 		return "", err

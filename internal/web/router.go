@@ -5,10 +5,15 @@
 package web
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -42,6 +47,25 @@ type Site struct {
 	Problem         string   `json:"problem,omitempty"`
 	Notice          string   `json:"notice,omitempty"`
 	URL             string   `json:"url,omitempty"`
+	DocRoot         string   `json:"doc_root,omitempty"`
+	FrontController string   `json:"front_controller,omitempty"`
+}
+
+// DocumentRoot returns the directory PHP-FPM and static files must use. Older
+// callers that never set DocRoot keep the historical Laravel layout.
+func (s Site) DocumentRoot() string {
+	if s.DocRoot != "" {
+		return s.DocRoot
+	}
+	return filepath.Join(s.Root, "public")
+}
+
+// FrontFile returns the PHP entrypoint used for pretty URLs.
+func (s Site) FrontFile() string {
+	if s.FrontController != "" {
+		return s.FrontController
+	}
+	return "index.php"
 }
 
 // Router maps request hosts to sites in a concurrency-safe way. `sites` is
@@ -111,7 +135,8 @@ func (r *Router) Remove(name string) {
 	}
 }
 
-// List returns all sites sorted by name.
+// List returns all sites sorted by name. Map iteration order is random, so an
+// explicit sort keeps the Sites pane stable across reloads.
 func (r *Router) List() []Site {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -119,6 +144,7 @@ func (r *Router) List() []Site {
 	for _, s := range r.sites {
 		out = append(out, s)
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -175,18 +201,34 @@ func stripPort(host string) string {
 // to <root>/public/<path>, falling back to index.php for directories and
 // pretty URLs (Laravel front-controller pattern).
 func FastCGIParams(site Site, serverName string, req *http.Request) map[string]string {
-	docRoot := filepath.Join(site.Root, "public")
+	docRoot := site.DocumentRoot()
 	urlPath := req.URL.Path
 	if urlPath == "" {
 		urlPath = "/"
 	}
 	clean := path.Clean("/" + urlPath)
 	script := filepath.Join(docRoot, filepath.FromSlash(strings.TrimPrefix(clean, "/")))
-	// Extension-less routes and directories use the Laravel front controller.
+	// Extension-less routes and directories use the framework front controller.
 	// Files with an extension (e.g. style.css) keep their real path.
 	base := path.Base(clean)
+	scriptName, pathInfo := clean, ""
 	if !strings.HasSuffix(clean, ".php") && !strings.Contains(base, ".") {
-		script = filepath.Join(docRoot, "index.php")
+		// A project can have several front controllers: Joomla's installer
+		// lives in installation/index.php, not in the root index.php. Prefer
+		// the index.php inside the requested directory when it exists.
+		dir := strings.TrimSuffix(clean, "/")
+		nested := filepath.Join(docRoot, filepath.FromSlash(strings.TrimPrefix(dir, "/")), site.FrontFile())
+		if info, err := os.Stat(nested); err == nil && !info.IsDir() {
+			script = nested
+			scriptName = path.Join("/", strings.TrimPrefix(dir, "/"), site.FrontFile())
+		} else {
+			script = filepath.Join(docRoot, site.FrontFile())
+			// FastCGI requires an absolute SCRIPT_NAME. Frameworks derive
+			// their base URL from it: a relative name makes the router resolve
+			// paths against the wrong root and return a generic 500. The
+			// pretty route belongs in PATH_INFO.
+			scriptName, pathInfo = "/"+site.FrontFile(), clean
+		}
 	}
 	method := req.Method
 	if method == "" {
@@ -194,7 +236,7 @@ func FastCGIParams(site Site, serverName string, req *http.Request) map[string]s
 	}
 	params := map[string]string{
 		"SCRIPT_FILENAME":   script,
-		"SCRIPT_NAME":       strings.TrimPrefix(clean, "/"),
+		"SCRIPT_NAME":       scriptName,
 		"DOCUMENT_ROOT":     docRoot,
 		"REQUEST_METHOD":    method,
 		"REQUEST_URI":       req.URL.RequestURI(),
@@ -203,12 +245,48 @@ func FastCGIParams(site Site, serverName string, req *http.Request) map[string]s
 		"SERVER_PROTOCOL":   req.Proto,
 		"GATEWAY_INTERFACE": "CGI/1.1",
 		"REDIRECT_STATUS":   "200",
+		// Laravel derives asset()/url() roots from the FastCGI request, not
+		// from APP_URL. Without the real Host/port, built assets point to :443
+		// while Lair serves HTTPS on 8443 and the page stays blank loading.
+		"HTTP_HOST": req.Host,
 	}
+	// One id per HTTP request lets the dumps agent group queries into a real
+	// request timeline. FPM workers are long-lived, so a per-process id would
+	// merge unrelated requests; the web layer is the only place that sees the
+	// start and end of each one.
+	requestID := req.Header.Get("X-Lair-Request-Id")
+	if requestID == "" {
+		var b [8]byte
+		if _, err := rand.Read(b[:]); err == nil {
+			requestID = hex.EncodeToString(b[:])
+		}
+	}
+	if requestID != "" {
+		params["LAIR_DUMPS_REQUEST_ID"] = requestID
+	}
+	// PHP only populates $_POST for requests advertising their type and size.
+	// Without these, install forms and any other POST reach the app with an
+	// empty superglobal even though the stdin record carried the body.
+	if contentType := req.Header.Get("Content-Type"); contentType != "" {
+		params["CONTENT_TYPE"] = contentType
+	}
+	if req.ContentLength >= 0 {
+		params["CONTENT_LENGTH"] = fmt.Sprintf("%d", req.ContentLength)
+	}
+	if pathInfo != "" {
+		params["PATH_INFO"] = pathInfo
+	}
+	port := "80"
 	if req.TLS != nil {
+		port = "443"
 		params["HTTPS"] = "on"
-		params["SERVER_PORT"] = "443"
+		params["REQUEST_SCHEME"] = "https"
 	} else {
-		params["SERVER_PORT"] = "80"
+		params["REQUEST_SCHEME"] = "http"
 	}
+	if _, chosen, err := net.SplitHostPort(req.Host); err == nil {
+		port = chosen
+	}
+	params["SERVER_PORT"] = port
 	return params
 }

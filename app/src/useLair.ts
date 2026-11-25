@@ -3,7 +3,7 @@ import { createClient, type DaemonClient, type JobStatus, type LairStatus } from
 
 /**
  * Single connection to the daemon for the whole desktop app. The status is
- * polled so the UI always reflects changes made from the TUI or the CLI; every
+ * polled so the UI always reflects changes made from the CLI; every
  * action goes through `act`, which refreshes afterwards and reports errors in
  * the same banner used by the sidebar.
  */
@@ -59,7 +59,7 @@ const JOB_POLL_MS = 300;
 const MAX_JOB_POLL_MS = 3000;
 
 /**
- * `clientFactory` lets a different surface (the terminal dashboard) supply its
+ * `clientFactory` lets a different daemon client supply its
  * own daemon connector while reusing the exact same state machine.
  */
 export function useLair(
@@ -135,6 +135,12 @@ export function useLair(
     let delayMs = REFRESH_MS;
     const tick = async () => {
       if (cancelled) return;
+      // A hidden window does not need a fresh status snapshot: skip the bridge
+      // round trip and re-render until it becomes visible again.
+      if (typeof document !== 'undefined' && document.hidden) {
+        timer = setTimeout(() => void tick(), MAX_REFRESH_MS);
+        return;
+      }
       try {
         const next = await client.status();
         if (cancelled) return;

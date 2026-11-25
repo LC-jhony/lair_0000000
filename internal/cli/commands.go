@@ -16,6 +16,7 @@ import (
 	"github.com/lair-sh/lair/internal/daemon"
 	"github.com/lair-sh/lair/internal/engine"
 	"github.com/lair-sh/lair/internal/installer"
+	"github.com/lair-sh/lair/internal/php"
 	"github.com/lair-sh/lair/internal/platform"
 	"github.com/lair-sh/lair/internal/shims"
 	"github.com/lair-sh/lair/internal/version"
@@ -149,7 +150,7 @@ func composerLabel(phar string) string {
 func (c *ctx) ensureShims() {
 	missing, onPath := shimStatus(c.paths.Bin)
 	// Go through the daemon so the engine's data root is authoritative also
-	// when shims were requested by the TUI or the desktop app. An older daemon
+	// when shims were requested by the desktop app. An older daemon
 	// may not know the action yet, so keep a local fallback.
 	var result struct {
 		BinDir string `json:"bin_dir"`
@@ -454,6 +455,34 @@ func (c *ctx) php(args []string) error {
 				mark = "*"
 			}
 			c.printf("%s %-8s %s\n", mark, p.Minor, p.Version)
+		}
+		return nil
+	case "detect":
+		dir := "."
+		if len(args) > 1 {
+			dir = args[1]
+		}
+		constraint, err := php.DetectConstraint(dir)
+		if err != nil {
+			return err
+		}
+		var st engine.Status
+		if err := c.call(daemon.ActionStatus, nil, &st); err != nil {
+			return err
+		}
+		installed := make([]php.Info, 0, len(st.PHP))
+		for _, p := range st.PHP {
+			installed = append(installed, php.Info{Minor: p.Minor})
+		}
+		minor, _, err := php.Detect(dir, installed)
+		if err != nil {
+			return err
+		}
+		c.printf("requisito: %s\n", orDash(constraint))
+		if minor == "" {
+			c.printf("sin requisito declarado; se usa el PHP por defecto\n")
+		} else {
+			c.printf("recomendado: %s\n", minor)
 		}
 		return nil
 	case "use":
@@ -985,9 +1014,14 @@ func (c *ctx) logs(args []string) error {
 // view. It is the first command to run when `node -v` or `php -v` is not found.
 func (c *ctx) doctor(args []string) error {
 	c.printf("Lair doctor\n")
+	dryRun := hasFlag(args, "--dry-run")
 	if hasFlag(args, "--fix") {
-		c.ensureShims()
-		c.printf("\n(Reparación aplicada: shims y PATH regenerados.)\n")
+		if dryRun {
+			c.printf("\n(Simulación: se regenerarían shims y fragmentos de PATH; no se ha cambiado nada.)\n")
+		} else {
+			c.ensureShims()
+			c.printf("\n(Reparación aplicada: shims y PATH regenerados.)\n")
+		}
 	}
 	c.printf("  home:    %s\n", c.paths.Root)
 	c.printf("  bin:     %s\n", c.paths.Bin)

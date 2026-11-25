@@ -39,6 +39,7 @@ const (
 	DirLog       = "log"         // log/<id>-install.log, service logs
 	DirRun       = "run"         // unix sockets, short path, 0700
 	DirCerts     = "certs"       // local CA + per-site certificates
+	DirSnapshots = "snapshots"   // database snapshots (0700, files 0600)
 	DirCache     = "cache"       // cache/binaries, manifest cache
 	DirCacheBin  = "binaries"    // cache/binaries/
 	DirConfig    = "config.json" // written only by the daemon
@@ -56,6 +57,7 @@ type Paths struct {
 	Log        string
 	Run        string
 	Certs      string
+	Snapshots  string
 	Cache      string
 	CacheBin   string
 	ConfigFile string
@@ -105,6 +107,7 @@ func Resolve() (Paths, error) {
 		Log:        filepath.Join(root, DirLog),
 		Run:        filepath.Join(root, DirRun),
 		Certs:      filepath.Join(root, DirCerts),
+		Snapshots:  filepath.Join(root, DirSnapshots),
 		Cache:      filepath.Join(root, DirCache),
 		CacheBin:   filepath.Join(root, DirCache, DirCacheBin),
 		ConfigFile: filepath.Join(root, DirConfig),
@@ -150,11 +153,11 @@ func ValidateProjectRoot(value string) (string, error) {
 func (p Paths) Ensure() error {
 	dirs := []string{
 		p.Root, p.Bin, p.Tools, p.PHP, p.Node, p.Services,
-		p.Log, p.Run, p.Certs, p.Cache, p.CacheBin,
+		p.Log, p.Run, p.Certs, p.Snapshots, p.Cache, p.CacheBin,
 	}
 	for _, dir := range dirs {
 		mode := os.FileMode(0o755)
-		if dir == p.Run {
+		if dir == p.Run || dir == p.Snapshots {
 			mode = 0o700
 		}
 		if err := os.MkdirAll(dir, mode); err != nil {

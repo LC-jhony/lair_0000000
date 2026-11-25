@@ -21,6 +21,10 @@ const (
 	ActionJobs             = "jobs"
 	ActionJobCancel        = "job-cancel"
 	ActionJobRetry         = "job-retry"
+	ActionQueue            = "queue"
+	ActionServicesHealth   = "services-health"
+	ActionSiteData         = "site-data"
+	ActionSiteStack        = "site-stack"
 	ActionPHPUninstall     = "php-uninstall"
 	ActionNodeUpdate       = "node-update"
 	ActionNodeUninstall    = "node-uninstall"
@@ -42,12 +46,14 @@ const (
 	ActionCreateDB         = "create-db"
 	ActionEnsureDatabase   = "ensure-database"
 	ActionDBDefault        = "db-default"
+	ActionDB               = "db"
 	ActionPark             = "park"
 	ActionLink             = "link"
 	ActionUnlink           = "unlink"
 	ActionSecure           = "secure"
 	ActionWeb              = "web"
 	ActionProject          = "project"
+	ActionWorktree         = "worktree"
 	ActionPin              = "pin"
 	ActionIsolate          = "isolate"
 	ActionUpdate           = "update"
@@ -74,7 +80,7 @@ type VersionResult struct {
 }
 
 // WebRequest and WebResult are the wire payloads for the single web action
-// shared by the desktop app, the TUI and the CLI. Supported ops are status,
+// shared by the desktop app and the CLI. Supported ops are status,
 // configure, https-on and https-off; the ports, bind and domain are configured
 // through "configure" (or the CLI's http/https-port/bind/domain shorthands).
 type WebRequest = engine.WebRequest
@@ -132,13 +138,21 @@ type LogSource = engine.LogSource
 
 // Mail, dumps and debugger share their wire types with the engine, which owns
 // the long-lived components. Aliases keep a single source of truth for the
-// JSON contract used by the desktop app, the TUI and the CLI.
+// JSON contract used by the desktop app and the CLI.
 type MailRequest = engine.MailRequest
 type MailResult = engine.MailResult
 type MailMessage = engine.MailMessage
 type MailAttachment = engine.MailAttachment
 
 type DumpsRequest = engine.DumpsRequest
+
+// DBRequest/DBResult alias the engine types so the wire contract has one
+// source of truth (same pattern as mail and dumps).
+type DBRequest = engine.DBRequest
+type DBResult = engine.DBResult
+
+type WorktreeRequest = engine.WorktreeRequest
+type WorktreeResult = engine.WorktreeResult
 type DumpsResult = engine.DumpsResult
 type DumpsOptions = engine.DumpsOptions
 type DumpEvent = engine.DumpEvent
@@ -206,7 +220,25 @@ type UnlinkRequest struct {
 
 // Site, mail, dumps and debugger share their wire types with the engine, which
 // owns the long-lived state. Aliases keep a single source of truth for the JSON
-// contract used by the desktop app, the TUI and the CLI.
+// contract used by the desktop app and the CLI.
+type QueueRequest struct {
+	Name string `json:"name"`
+}
+
+type QueueResult = engine.QueueInfo
+
+type SiteDataRequest struct {
+	Name string `json:"name"`
+}
+
+type SiteDataResult = engine.SiteData
+
+type SiteStackRequest struct {
+	Name string `json:"name"`
+}
+
+type SiteStackResult = engine.StackInfo
+
 type SiteRequest = engine.SiteRequest
 type SiteResult = engine.SiteResult
 type SiteDetail = engine.SiteDetail

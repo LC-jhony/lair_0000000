@@ -10,6 +10,8 @@ export type PaneId =
   | 'dumps'
   | 'debugger'
   | 'logs'
+  | 'jobs'
+  | 'activity'
   | 'system';
 
 export interface PaneProps {

@@ -14,6 +14,7 @@ import type {
   MailResult,
   DumpsPayload,
   DumpsResult,
+  DBResult,
   DebuggerPayload,
   DebuggerResult,
   LogSource,
@@ -122,6 +123,14 @@ export class FakeDaemon implements DaemonClient {
         return this.job(String(p.id)) as T;
       case ACTIONS.jobs:
         return this.jobs() as T;
+      case ACTIONS.queue:
+        return this.queue(String(p.name)) as T;
+      case ACTIONS.servicesHealth:
+        return this.servicesHealth() as T;
+      case ACTIONS.siteData:
+        return this.siteData(String(p.name)) as T;
+      case ACTIONS.siteStack:
+        return this.siteStack(String(p.name)) as T;
       case ACTIONS.cancelJob:
         return this.cancelJob(String(p.id)) as T;
       case ACTIONS.log:
@@ -159,6 +168,10 @@ export class FakeDaemon implements DaemonClient {
         return { already_installed: true } as T;
       case ACTIONS.createDB:
         return { text: await this.createDB(String(p.id), String(p.name)) } as T;
+      case ACTIONS.db:
+        return { output: `db ${String((p as { op?: string }).op ?? 'list')} (demo)`, snapshots: [] } as T;
+      case ACTIONS.worktree:
+        return { output: `worktree ${String((p as { op?: string }).op ?? 'list')} (demo)`, worktrees: [] } as T;
       case ACTIONS.park:
         return { text: await this.park(String(p.path)) } as T;
       case ACTIONS.link:
@@ -252,6 +265,53 @@ export class FakeDaemon implements DaemonClient {
     return [...this.jobsData.values()].filter((job) => !job.done).map((job) => clone(job));
   }
 
+  async siteStack(name: string) {
+    return {
+      site: name,
+      framework: 'wordpress',
+      framework_version: '6.8',
+      database: 'sqlite (drop-in oficial)',
+      database_name: 'wp_dev',
+      cache: 'object cache WordPress',
+      web_root: '/srv/wp-app',
+      front_controller: 'index.php',
+      php: '8.5',
+      node: 'v26.13.1',
+      server: 'Lair web · PHP-FPM',
+      components: ['PHP-FPM', 'HTTPS', 'Node v26.13.1', 'BD sqlite'],
+    };
+  }
+
+  async siteData(name: string) {
+    return {
+      site: name,
+      tables: [
+        { name: 'users', rows: 3 }, { name: 'jobs', rows: 1 },
+        { name: 'migrations', rows: 12 },
+      ],
+      cache_keys: 2,
+      mail: 1,
+    };
+  }
+
+  async servicesHealth() {
+    const services = this.statusData.services ?? {};
+    return Object.entries(services).map(([id, svc]) => ({
+      id, healthy: Boolean(svc?.running), detail: svc?.running ? 'ok' : 'stopped',
+    }));
+  }
+
+  async queue(name: string) {
+    return {
+      site: name,
+      driver: 'database',
+      pending: 1,
+      failed: 0,
+      worker: 'not supervised',
+      hint: 'lair exec php artisan queue:work database --once',
+    };
+  }
+
   async cancelJob(id: string) {
     const job = this.jobsData.get(id);
     if (job) {
@@ -263,7 +323,9 @@ export class FakeDaemon implements DaemonClient {
   }
 
   async log(name: string) {
-    return this.logsData[name] ?? '';
+    // Site logs are addressed as `site:<host>:<file>`, matching the daemon.
+    const key = name.startsWith('site:') ? (name.split(':').pop() ?? name) : name;
+    return this.logsData[key] ?? this.logsData[name] ?? '';
   }
 
   async usePHP(minor: string) {
@@ -382,6 +444,7 @@ export class FakeDaemon implements DaemonClient {
         this.syncToolingStatus();
         return this.mailSnapshot('smtp stopped');
       case 'clear':
+        if (!payload.confirm) throw new Error('confirmación requerida para limpiar la bandeja');
         this.mailState.messages = [];
         this.syncToolingStatus();
         return this.mailSnapshot('inbox cleared');
@@ -434,6 +497,7 @@ export class FakeDaemon implements DaemonClient {
         };
         return this.dumpsSnapshot('dump options updated');
       case 'clear':
+        if (!payload.confirm) throw new Error('confirmación requerida para borrar los dumps');
         this.dumpsState.events = [];
         this.syncToolingStatus();
         return this.dumpsSnapshot('dumps cleared');
@@ -483,6 +547,10 @@ export class FakeDaemon implements DaemonClient {
 
   async createDB(id: string, name: string) {
     return `CREATE DATABASE ${name} (${id})`;
+  }
+
+  async db(_payload: Record<string, unknown>): Promise<DBResult> {
+    return { output: 'db (demo)', snapshots: [] };
   }
 
   async park(path: string) {
@@ -606,6 +674,9 @@ export class FakeDaemon implements DaemonClient {
       case 'env': {
         const entries = this.siteEnv.get(name) ?? this.defaultEnv(name);
         this.siteEnv.set(name, clone(entries));
+        if (payload.reveal && payload.key) {
+          return { value: entries.find((entry) => entry.key === payload.key)?.value ?? '' };
+        }
         return { env: clone(entries) };
       }
       case 'env-set': {

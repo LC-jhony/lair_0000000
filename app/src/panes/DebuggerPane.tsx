@@ -15,7 +15,7 @@ import {
 import { useT } from '../i18n';
 import type { PaneProps } from './types';
 
-/** Xdebug/PhpStorm session console, mirroring the TUI debugger pane. */
+/** Xdebug/PhpStorm session console. */
 export function DebuggerPane({ state }: PaneProps) {
   const t = useT();
   const [result, setResult] = useState<DebuggerResult | null>(null);

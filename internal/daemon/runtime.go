@@ -10,6 +10,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -66,6 +70,42 @@ func Defaults(paths app.Paths, catalog *manifest.Catalog) RuntimeConfig {
 	}
 }
 
+const (
+	daemonMaxProcs        = 4
+	daemonDefaultLimitMib = 256
+	memoryLimitEnv        = "LAIR_DAEMON_MEMORY_LIMIT_MIB"
+)
+
+// resourceLimits is the pure calculation behind the startup resource caps.
+// maxProcs is the current GOMAXPROCS value: the result only ever lowers it.
+// A non-positive limitMib means "use the default".
+func resourceLimits(maxProcs, limitMib int) (int, int64) {
+	if maxProcs > daemonMaxProcs {
+		maxProcs = daemonMaxProcs
+	}
+	if limitMib <= 0 {
+		limitMib = daemonDefaultLimitMib
+	}
+	return maxProcs, int64(limitMib) * 1024 * 1024
+}
+
+// applyResourceLimits caps scheduler parallelism and installs a soft heap
+// limit once, when the daemon starts. An invalid environment value is ignored
+// with a warning so it cannot prevent the daemon from coming up.
+func applyResourceLimits() {
+	limitMib := daemonDefaultLimitMib
+	if raw := os.Getenv(memoryLimitEnv); raw != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+			limitMib = n
+		} else {
+			fmt.Fprintf(os.Stderr, "lair: warning: invalid %s=%q, using %d MiB\n", memoryLimitEnv, raw, daemonDefaultLimitMib)
+		}
+	}
+	procs, limitBytes := resourceLimits(runtime.GOMAXPROCS(0), limitMib)
+	runtime.GOMAXPROCS(procs)
+	debug.SetMemoryLimit(limitBytes)
+}
+
 // New builds the runtime. No sockets are opened until Run is called.
 func New(cfg RuntimeConfig) (*Runtime, error) {
 	if cfg.Domain == "" {
@@ -93,6 +133,11 @@ func New(cfg RuntimeConfig) (*Runtime, error) {
 	// Project discovery mutates config and the filesystem. Do it once at daemon
 	// startup instead of from every read-only Status() call (including shims).
 	_ = eng.SyncProjectDirs()
+	// Register worktrees after ordinary projects so branch sites are marked
+	// as Lair-owned; never take over a site linked by hand.
+	if view, err := eng.Config.View(); err == nil && view.Worktrees.Auto {
+		_, _ = eng.SyncWorktrees(context.Background())
+	}
 
 	// Explicit --http-port/--https-port flags override the persisted settings
 	// for this daemon run; with no flags config.json remains authoritative.
@@ -130,6 +175,7 @@ func (r *Runtime) DesktopToken() string { return r.desktopToken }
 // Run starts every enabled component and blocks until ctx is cancelled, a
 // shutdown signal arrives, or a fatal component error occurs.
 func (r *Runtime) Run(ctx context.Context) error {
+	applyResourceLimits()
 	runCtx, cancel := context.WithCancel(ctx)
 	r.stop = cancel
 	defer cancel()

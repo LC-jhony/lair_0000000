@@ -1,12 +1,21 @@
 GO ?= go
 BIN := lair
 
+VERSION ?= $(shell git describe --tags --always 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE ?= $(shell git log -1 --format=%cd --date=format:%Y-%m-%d 2>/dev/null || echo unknown)
+VERSION_PKG := github.com/lair-sh/lair/internal/version
+LDFLAGS := -s -w \
+	-X $(VERSION_PKG).BuildVersion=$(VERSION) \
+	-X $(VERSION_PKG).BuildCommit=$(COMMIT) \
+	-X $(VERSION_PKG).BuildDate=$(DATE)
+
 .PHONY: all build test test-race fmt vet lint coverage clean
 
 all: test build
 
 build:
-	$(GO) build -o $(BIN) ./cmd/lair
+	$(GO) build -buildmode=pie -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/lair
 
 test:
 	$(GO) test ./...

@@ -14,26 +14,33 @@ export interface LogSourceListProps {
 }
 
 interface Entry {
+  key: string;
   name: string;
   label: string;
   path?: string;
   kind: 'site' | 'service';
 }
 
+/** Site log files live in the project, so the daemon needs a qualified key. */
+export function logKey(source: LogSource, file: string): string {
+  return source.kind === 'site' ? `site:${source.id}:${file}` : file;
+}
+
 function entries(sources: LogSource[], items: string[]): Entry[] {
   const fromSources: Entry[] = sources.flatMap((source) =>
     (source.files ?? []).map((file) => ({
+      key: logKey(source, file),
       name: file,
       label: source.name || source.id || file,
       path: source.path,
       kind: source.kind === 'site' ? 'site' : 'service',
     })),
   );
-  const known = new Set(fromSources.map((entry) => entry.name));
+  const known = new Set(fromSources.flatMap((entry) => [entry.key, entry.name]));
   // Older daemons omit sources; newer ones can still list files outside them.
   const leftovers = items
     .filter((name) => !known.has(name))
-    .map((name) => ({ name, label: name, kind: 'service' as const }));
+    .map((name) => ({ key: name, name, label: name, kind: 'service' as const }));
   return [...fromSources, ...leftovers];
 }
 
@@ -60,12 +67,12 @@ export function LogSourceList({ sources = [], items = [], selected, query = '', 
       </p>
       {list.map((entry) => (
         <button
-          key={entry.name}
+          key={entry.key}
           type="button"
-          aria-current={selected === entry.name ? 'true' : undefined}
-          onClick={() => onSelect(entry.name)}
+          aria-current={selected === entry.key ? 'true' : undefined}
+          onClick={() => onSelect(entry.key)}
           className={`flex w-full flex-col gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-            selected === entry.name
+            selected === entry.key
               ? 'border-primary/50 bg-primary/10'
               : 'border-border bg-muted/30 hover:bg-accent'
           }`}

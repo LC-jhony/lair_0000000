@@ -8,7 +8,9 @@ import {
   CodeBlock,
   ComponentJobFailure,
   ComponentJobProgress,
+  DumpsTimeline,
   LogViewer,
+  Progress,
   ServiceInstallForm,
   SettingsError,
   StatusDot,
@@ -98,6 +100,30 @@ describe('componentes base', () => {
     expect(onShowLog).toHaveBeenCalledOnce();
     expect(onRetry).toHaveBeenCalledOnce();
     expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('Progress colorea la barra según el tono', () => {
+    const low = render(<Progress value={20} tone="danger" label="Bajo" />);
+    expect(low.container.querySelector('.bg-destructive')).toBeTruthy();
+    low.unmount();
+    const mid = render(<Progress value={70} tone="warning" label="Medio" />);
+    expect(mid.container.querySelector('.bg-amber-500')).toBeTruthy();
+    mid.unmount();
+    const done = render(<Progress value={100} tone="success" label="Listo" />);
+    expect(done.container.querySelector('.bg-emerald-500')).toBeTruthy();
+  });
+
+  it('DumpsTimeline formatea dumps y permite ver el crudo', () => {
+    const event = {
+      id: 'd1', site: 'app-blade', type: 'logs', time: '2026-11-24T20:35:00Z', request: '/lair-dumps-demo',
+      message: '<script>var x=1;</script><pre class="sf-dump">"Lair Dumps desde peticion HTTP"</pre>',
+    };
+    renderWithI18n(<DumpsTimeline events={[event]} />);
+    expect(screen.getByText('Views')).toBeTruthy();
+    expect(screen.getByText(/"Lair Dumps desde peticion HTTP"/)).toBeTruthy();
+    const raw = screen.getByRole('button', { name: 'View raw' });
+    fireEvent.click(raw);
+    expect(screen.getByText(/var x=1/)).toBeTruthy();
   });
 
   it('ServiceInstallForm valida el puerto, sugiere otro y envía la línea elegida', () => {

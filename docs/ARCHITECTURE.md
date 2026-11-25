@@ -29,7 +29,8 @@ internal/
   project/                asistente Laravel compartido (acción `project`): ProjectDirs, migrate-dirs e import-valet (solo lectura de ~/.valet)
   nvm/                    carga de nvm.sh y ejecución con argv validado
   engine/                 orquestación compartida; control de Xdebug bajo demanda (acción `debugger`) y detalle de sitios en site.go (acción `site`)
-  cli/                    comandos, conexión daemon/offline, resolución de shims, panes TUI
+  cli/                    comandos, conexión daemon/offline, resolución de shims
+  tui/                    dashboard full-screen (Charm v2), Snapshot vía daemon.Caller
   version/                parser semver y resolución exacta/major
 ```
 
@@ -50,7 +51,7 @@ internal/
 | `mail` | funciones de control | Catcher SMTP en `127.0.0.1:2525`: `status`, `start`, `stop`, `list`, `clear` sobre la bandeja local |
 | `dumps` | funciones de control | `status`, `capture-on`, `capture-off`, `list`, `clear`; agente inyectado por `auto_prepend_file` en pools FPM con token `0600` |
 | `desktopapi` | `Server` | `New(caller, token)`, `ServeHTTP` — solo `POST /api`, token en `X-Lair-Token`. La app Electron realiza las llamadas en el proceso main (`lair:call`) para que el token nunca llegue al renderer; `Origin: null` se rechaza |
-| `project` | `CreateRequest`, `Info` | `Detect(resolver, paths)`, `RunLaravel(...)` — misma acción para desktop, TUI y CLI |
+| `project` | `CreateRequest`, `Info` | `Detect(resolver, paths)`, `RunLaravel(...)` — misma acción para desktop y CLI |
 | `nvm` | funciones | `ValidateArgs`, `Install`, `Exec` — carga `nvm.sh` sin interpolación de shell |
 | `engine` | `Engine` | `InstallPHP`, `InstallNode`, `InstallService`, `Status`, `ResolveTool`, `Bootstrap`; `DebuggerControl` activa Xdebug bajo demanda reutilizando los pools FPM; `SiteControl` (`site.go`) construye el detalle, lee/escribe `.env` enmascarado, fija dominios, alterna `enabled`, devuelve el vhost generado y valida el borrado de archivos |
 | `config` | Store de sitios | `sites` en `config.json` guarda host, ruta, versiones y los alias por sitio; el borrado de archivos es una operación explícita de la acción `site` |
@@ -69,11 +70,11 @@ La vista de sitio que usan el router y la desktop (`internal/web/router.go`) man
 | `NodeSource` / `NodeFile` | Origen y archivo de la versión de Node resuelta. |
 | `URL` / `Problem` / `Notice` | URL pública del sitio y avisos o incidencias para la interfaz. |
 
-`SiteDetail` (`engine/site.go`) es la proyección completa devuelta por `op: detail`: incluye además `enabled` y `root_state` (con `root_suggestions`, `problem` y `notice`), `database_host`, `database_port` y `database_name`. El entorno se expone por separado con `op: env` (`SiteEnvEntry`: `key`, `value`, `secret`, `set`), con los valores secretos enmascarados en el servidor; nunca salen del daemon en `status`.
+`SiteDetail` (`engine/site.go`) es la proyección completa devuelta por `op: detail`: incluye además `enabled` y `root_state` (con `root_suggestions`, `problem` y `notice`), `database_host`, `database_port` y `database_name`. El entorno se expone por separado con `op: env` (`SiteEnvEntry`: `key`, `value`, `secret`, `set`), con los valores secretos enmascarados en el servidor; nunca salen del daemon en `status` ni en `detail`. La interfaz puede pedir **un** valor concreto con `op: env`, `key` y `reveal: true` (petición explícita del usuario, p. ej. el botón ojo de la contraseña); la respuesta lleva solo `value` y no se registra en logs.
 
 ### Layout del host virtual y página de estado
 
-El router web Go (`internal/web/router.go`) construye los hosts virtuales a partir de la vista de sitio: además de `Name`, `Root`, `PHPSocket`, `Cert`, `Key` y `Domains`, incorpora **`Enabled`**, **`RootState`** y el directorio de páginas (`<LAIR_HOME>/web/pages`). La acción `site` (`op: config`) devuelve la definición del host virtual generado, la misma que usa el router; la desktop lo muestra con el botón **View generated vhost** y la TUI con la tecla **`V`**. El vhost contiene solo rutas, sockets, certificados, dominios y puertos: ningún secreto ni valor del `.env`.
+El router web Go (`internal/web/router.go`) construye los hosts virtuales a partir de la vista de sitio: además de `Name`, `Root`, `PHPSocket`, `Cert`, `Key` y `Domains`, incorpora **`Enabled`**, **`RootState`** y el directorio de páginas (`<LAIR_HOME>/web/pages`). La acción `site` (`op: config`) devuelve la definición del host virtual generado, la misma que usa el router; la desktop lo muestra con el botón **View generated vhost**. El vhost contiene solo rutas, sockets, certificados, dominios y puertos: ningún secreto ni valor del `.env`.
 
 - **Sin configuración en `/etc`**: el servidor Go integrado mantiene los hosts virtuales en memoria, derivados de `config.json`, y aplica los cambios en caliente sin privilegios. Activar o desactivar un sitio **no** crea ni borra enlaces ni archivos en el sistema: `Enabled` decide si el host se publica en el router. Así no se mezcla con la configuración de la distro y no hay configuración externa que validar. Decisión en el [ADR 009](adr/009-virtual-hosts-en-servidor-go.md).
 - **Página de estado**: cuando `RootState != ok` (raíz ausente, vacía o con `index.php` en la raíz), el **servidor Go integrado** sirve una página de estado generada en `web.Server` en lugar de pasar la petición a PHP-FPM. Muestra el host y la ruta esperada del front controller (`<raíz>/public/index.php`); no incluye rutas internas de `LAIR_HOME`, tokens ni variables de entorno. Los archivos bajo `web/nginx/` de `engine/vhost.go` son solo una vista previa del vhost, no una fuente de enrutado.
@@ -89,7 +90,7 @@ El router web Go (`internal/web/router.go`) construye los hosts virtuales a part
 
 - `migrate-dirs` (`project` con `op: migrate-dirs`; CLI `lair migrate-dirs`): mueve los proyectos de `~/lair` a `~/Lair`, conserva los archivos y actualiza los sitios registrados; la carpeta antigua no se borra sin confirmación.
 - `import-valet` (`op: import-valet`; CLI `lair import-valet`): lee `~/.valet/config.json` y `~/.valet/Sites` **solo en lectura** y registra las rutas y dominios como sitios aparcados. Lair no escribe en esos archivos, no instala Valet y nunca lo ejecuta como root.
-- Las operaciones de carpetas (`dirs-list`, `dirs-add`, `dirs-remove`, `dirs-default`, `migrate-dirs`, `import-valet`) comparten la acción `project`, por lo que no añaden acciones al inventario de **49**; la TUI las agrupa bajo la tecla **`F`**.
+- Las operaciones de carpetas (`dirs-list`, `dirs-add`, `dirs-remove`, `dirs-default`, `migrate-dirs`, `import-valet`) comparten la acción `project`, por lo que no añaden acciones al inventario de **49**.
 - La página **Sites**, `SiteDetail` y el layout del host virtual descritos más arriba no cambian: los proyectos migrados o importados se integran en el mismo router web Go a partir de `config.json`.
 
 **Puertos y DNS.** El web layer enlaza `127.0.0.1:80` y `127.0.0.1:443` por defecto. `setup-privileged.sh` concede `CAP_NET_BIND_SERVICE` a la unidad (`AmbientCapabilities=CAP_NET_BIND_SERVICE`, con `User=%i` y `NoNewPrivileges=yes`; el daemon nunca corre como root) y ofrece `setcap` sobre el binario como alternativa. Sin esa capacidad, usa Configuración de Lair en Sitios (8080/8443) o los flags `--http-port`/`--https-port`. En Linux el DNS lo sirve un servicio **dnsmasq** configurado únicamente en `127.0.0.1:53535` (nunca en el puerto 53 global); el drop-in de `systemd-resolved` fija `DNS=127.0.0.1#53535` y `Domains=~test`, de modo que solo `*.test` se reenvía al resolver local. Si resolved o dnsmasq fallan, el sistema vuelve al upstream habitual (**fallback automático**); el plan guarda la configuración previa y `revert-privileged.sh` realiza el rollback. En macOS no hay systemd: el plan escribe `/etc/resolver/test` y el **servidor DNS embebido de Lair** (`internal/dns`, multiplataforma) responde en `127.0.0.1:53535`. En Windows se usa un bloque gestionado en el archivo `hosts` y workers `php-cgi` por puerto loopback, sin sockets UNIX.
@@ -136,15 +137,15 @@ petición al sitio (*.test:80/443, servidor Go integrado)
 ```
 
 - `capture-on` escribe/activa el `auto_prepend_file` en la configuración del pool; `capture-off` lo desactiva sin dejar el agente cargado. El token del agente es distinto del token de la API y se guarda con `0600` en `run/`.
-- Xdebug se habilita solo mientras se depura: `debugger start|enable` prepara el pool existente y `stop|disable` lo desactiva. No queda un pool de depuración escuchando.
+- Xdebug se habilita solo mientras se depura: `debugger detect-on` prepara el pool existente y `detect-off` lo desactiva (`breakpoints-on|off` controla los puntos de rotura). No queda un pool de depuración permanente.
 - El correo sale por el SMTP catcher integrado (`internal/mail`) en `127.0.0.1:2525`, que vuelca los mensajes a la bandeja consultada por la acción `mail`. Es un componente propio de Lair: no se instala Mailcatcher ni Caddy.
 
 ## Flujo del detalle de sitio y publicación de hosts virtuales
 
-La acción `site` (campo `op`) es la única fuente del detalle de siete pestañas de la desktop; la TUI consume un subconjunto con `E` (Overview + Environment) y `X` (borrar con confirmación). La lógica de sitio vive en `engine/site.go` y el router web Go publica los hosts virtuales a partir de `config.json`:
+La acción `site` (campo `op`) es la única fuente del detalle de siete pestañas de la desktop. La lógica de sitio vive en `engine/site.go` y el router web Go publica los hosts virtuales a partir de `config.json`:
 
 ```
-desktop (7 pestañas, View generated vhost) / TUI (E, V, X, toggle enabled/disabled)
+desktop (7 pestañas, View generated vhost, toggle enabled/disabled)
   -> POST /api { action: "site", payload: { op, name, key, value, domains, enabled, delete_files } }
      -> Dispatcher -> engine.SiteControl
         -> op detail        -> SiteDetail (config + .env + filesystem; enabled, root_state; sin secretos)
@@ -172,13 +173,13 @@ web (acción `web`: status / configure / https-on / https-off):
 
 `internal/daemon/protocol.go` define los nombres de acción y los payloads. El daemon registra un `Dispatcher` en el `Server` de la API; la CLI crea un `Client` si `run/api.sock` responde y, si no, usa el mismo `Dispatcher` contra un `Engine` local. Así no hay dos implementaciones de la lógica de negocio.
 
-El inventario compartido se deriva de las constantes `Action*` en `internal/daemon/protocol.go` (ya no se documenta un número fijo). `mail`, `dumps`, `debugger` y `site` siguen el patrón de un campo `op` en el payload, y `logs-list` acepta `sources`. `uninstall` y `shutdown` son internas del `Dispatcher`. `app/scripts/check-actions.mjs` comprueba que las acciones declaradas por el cliente existan en el daemon (y que no falte ninguna acción de daemon salvo un conjunto explícito de acciones solo-CLI), sin fijar un contador obsoleto. Los panes de la desktop/TUI solo consumen este protocolo; la lógica vive en `engine`.
+El inventario compartido se deriva de las constantes `Action*` en `internal/daemon/protocol.go` (ya no se documenta un número fijo). `mail`, `dumps`, `debugger` y `site` siguen el patrón de un campo `op` en el payload, y `logs-list` acepta `sources`. `uninstall` y `shutdown` son internas del `Dispatcher`. `app/scripts/check-actions.mjs` comprueba que las acciones declaradas por el cliente existan en el daemon (y que no falte ninguna acción de daemon salvo un conjunto explícito de acciones solo-CLI), sin fijar un contador obsoleto. Los panes de la desktop solo consumen este protocolo; la lógica vive en `engine`.
 
 El token se genera con `crypto/rand`, se escribe en `run/api.token` con `0600` y se compara con `subtle.ConstantTimeCompare`.
 
 ## Decisiones de implementación
 
-- **Sin dependencias de sistema en el daemon.** La lógica Go usa la biblioteca estándar; las únicas librerías externas son Charmbracelet (Bubble Tea, Bubbles y Lip Gloss) para el dashboard TUI y `go-isatty` para detectar TTY. El daemon se compila en un binario único y reproducible. La administración gráfica vive aparte, en `app/` (Electron + React), y se empaqueta para Linux, macOS y Windows con `npm run dist`.
+- **Sin dependencias de sistema en el daemon.** La lógica Go usa la biblioteca estándar; las únicas librerías externas son Charm v2 (Bubble Tea, Bubbles, Lip Gloss, Huh y bubblezone) para `lair tui`, y `github.com/charmbracelet/x/term` y `go-isatty` para detectar TTY. El daemon se compila en un binario único y reproducible. La administración gráfica vive aparte, en `app/` (Electron + React), y se empaqueta para Linux, macOS y Windows con `npm run dist`.
 - **Sin UI web.** Se eliminó el SPA embebido. `internal/desktopapi` expone únicamente `POST /api` en loopback con token en cabecera; el proceso principal de Electron lee `run/desktop.token` y `run/desktop.url` y los pasa al renderer por IPC. Las reglas de negocio siguen estando solo en el `Dispatcher`.
 - **Capa web embebida.** En lugar de distribuir un proxy externo, se implementa la capa necesaria en Go (`net/http` + `GetCertificate` + FastCGI). Cubre router por host, estáticos y proxy a FPM.
 - **Privilegios únicos y previos.** Ninguna acción privilegiada se ejecuta en caliente: se genera un script que el usuario revisa y ejecuta una vez. El drop-in de systemd usa `AmbientCapabilities=CAP_NET_BIND_SERVICE` (o `setcap` sobre el binario) para los puertos 80/443, sin ejecutar el daemon ni Valet como root. El DNS se apoya en dnsmasq en `127.0.0.1:53535` y un drop-in de `systemd-resolved` con `Domains=~test`; el plan guarda copia de seguridad y permite rollback, con fallback automático al resolver del sistema.

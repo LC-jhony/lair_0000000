@@ -131,7 +131,7 @@ func (c *ctx) project(args []string) error {
 }
 
 // projectDirs manages the list of folders Lair scans for projects. All
-// operations go through the single `project` action so the CLI, the TUI and
+// operations go through the single `project` action so the CLI and
 // the desktop app share the exact same wire contract.
 func (c *ctx) projectDirs(args []string) error {
 	if hasHelp(args) {

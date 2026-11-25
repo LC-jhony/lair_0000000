@@ -25,12 +25,13 @@ import (
 
 // MailRequest is the wire payload of the `mail` daemon action. Port is an
 // optional override: 0 uses config.json, -1 asks the kernel for a free port
-// (used by tests and diagnostics). Desktop/TUI only send op and id.
+// (used by tests and diagnostics). The desktop app only sends op and id.
 type MailRequest struct {
-	Op    string `json:"op"`
-	ID    string `json:"id"`
-	Port  int    `json:"port,omitempty"`
-	Inbox string `json:"inbox,omitempty"`
+	Op      string `json:"op"`
+	ID      string `json:"id"`
+	Port    int    `json:"port,omitempty"`
+	Inbox   string `json:"inbox,omitempty"`
+	Confirm bool   `json:"confirm,omitempty"` // required for op=clear
 }
 
 // MailAttachment is one file attached to a captured message. The body itself
@@ -679,6 +680,9 @@ func (e *Engine) MailControl(ctx context.Context, req MailRequest) (MailResult, 
 		}
 		out.Output = "SMTP detenido"
 	case "clear":
+		if !req.Confirm {
+			return MailResult{}, fmt.Errorf("vaciar la bandeja requiere confirmación (confirm: true)")
+		}
 		if err := server.clear(req.Inbox); err != nil {
 			return out, fmt.Errorf("clear mail: %w", err)
 		}

@@ -30,6 +30,26 @@ type Spec struct {
 	EnvSnippet  string // Laravel .env snippet
 }
 
+const (
+	typesenseAPIKeyEnv = "LAIR_TYPESENSE_API_KEY"
+	rustFSUserEnv      = "LAIR_RUSTFS_USER"
+	rustFSPasswordEnv  = "LAIR_RUSTFS_PASSWORD"
+
+	defaultTypesenseAPIKey = "lair"
+	defaultRustFSUser      = "rustfsadmin"
+	defaultRustFSPassword  = "rustfsadmin"
+)
+
+// envOr returns the environment value of key when it is set and non-empty,
+// otherwise the built-in default. Keeping the defaults preserves existing
+// installations while allowing operators to rotate the demo credentials.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
 // serviceBinary adds the Windows executable suffix to a service's binary name.
 func serviceBinary(name string) string {
 	if strings.HasPrefix(app.Platform(), "windows-") {
@@ -202,10 +222,11 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 		s.StopSignal = "SIGTERM"
 		s.EnvSnippet = fmt.Sprintf("SCOUT_DRIVER=meilisearch\nMEILISEARCH_HOST=http://127.0.0.1:%d\nMEILISEARCH_KEY=\n", port)
 	case "typesense":
+		apiKey := envOr(typesenseAPIKeyEnv, defaultTypesenseAPIKey)
 		s.Executable = filepath.Join(install, "bin", serviceBinary("typesense-server"))
 		s.Args = []string{
 			"--data-dir", data,
-			"--api-key=lair",
+			"--api-key=" + apiKey,
 			"--api-address=127.0.0.1",
 			"--api-port=" + strconv.Itoa(port),
 			"--peering-address=127.0.0.1",
@@ -213,8 +234,10 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 			"--enable-cors",
 		}
 		s.StopSignal = "SIGTERM"
-		s.EnvSnippet = fmt.Sprintf("SCOUT_DRIVER=typesense\nTYPESENSE_HOST=127.0.0.1\nTYPESENSE_PORT=%d\nTYPESENSE_PROTOCOL=http\nTYPESENSE_API_KEY=lair\n", port)
+		s.EnvSnippet = fmt.Sprintf("SCOUT_DRIVER=typesense\nTYPESENSE_HOST=127.0.0.1\nTYPESENSE_PORT=%d\nTYPESENSE_PROTOCOL=http\nTYPESENSE_API_KEY=%s\n", port, apiKey)
 	case "rustfs":
+		user := envOr(rustFSUserEnv, defaultRustFSUser)
+		password := envOr(rustFSPasswordEnv, defaultRustFSPassword)
 		s.Executable = filepath.Join(install, "bin", serviceBinary("rustfs"))
 		s.Dir = data
 		s.Args = []string{
@@ -222,15 +245,15 @@ func Build(paths app.Paths, id, version string, port int, build string) (Spec, e
 			"--address", fmt.Sprintf("127.0.0.1:%d", port),
 			"--console-enable",
 			"--console-address", fmt.Sprintf("127.0.0.1:%d", port+1),
-			"--access-key", "rustfsadmin",
-			"--secret-key", "rustfsadmin",
+			"--access-key", user,
+			"--secret-key", password,
 			".",
 		}
 		s.StopSignal = "SIGTERM"
 		if strings.HasPrefix(app.Platform(), "macos-") {
 			s.Env = append(s.Env, "DYLD_FALLBACK_LIBRARY_PATH=/usr/lib")
 		}
-		s.EnvSnippet = fmt.Sprintf("FILESYSTEM_DISK=s3\nAWS_ACCESS_KEY_ID=rustfsadmin\nAWS_SECRET_ACCESS_KEY=rustfsadmin\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET=laravel\nAWS_ENDPOINT=http://127.0.0.1:%d\nAWS_URL=http://127.0.0.1:%d/laravel\nAWS_USE_PATH_STYLE_ENDPOINT=true\n", port, port)
+		s.EnvSnippet = fmt.Sprintf("FILESYSTEM_DISK=s3\nAWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_DEFAULT_REGION=us-east-1\nAWS_BUCKET=laravel\nAWS_ENDPOINT=http://127.0.0.1:%d\nAWS_URL=http://127.0.0.1:%d/laravel\nAWS_USE_PATH_STYLE_ENDPOINT=true\n", user, password, port, port)
 	default:
 		return Spec{}, fmt.Errorf("unknown service %q", id)
 	}

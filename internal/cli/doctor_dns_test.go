@@ -6,6 +6,16 @@ import (
 	"testing"
 )
 
+func TestDoctorDryRunDoesNotRepair(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if err := run([]string{"doctor", "--fix", "--dry-run"}, &out, &errOut); err != nil {
+		t.Fatalf("doctor --fix --dry-run: %v (%s)", err, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Simulación") || strings.Contains(out.String(), "Reparación aplicada") {
+		t.Fatalf("dry run applied changes or did not announce simulation:\n%s", out.String())
+	}
+}
+
 func TestDoctorChecksDNSAndWebPorts(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if err := run([]string{"doctor"}, &out, &errOut); err != nil {

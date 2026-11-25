@@ -146,6 +146,8 @@ export function DumpsPane({ state }: PaneProps) {
             <StatCard label={t('dumps.total')} value={String(events.length)} icon={<Activity />} />
             <StatCard label={t('dumps.sites')} value={String(new Set(events.map((event) => event.site).filter(Boolean)).size)} />
             <StatCard label={t('dumps.queries')} value={String(events.filter((event) => event.type === 'queries').length)} />
+            <StatCard label={t('dumps.slowQueries')} value={String(result?.insights?.slow_queries.length ?? 0)} />
+            <StatCard label={t('dumps.nplusone')} value={String(result?.insights?.n_plus_one.length ?? 0)} />
           </div>
           <div className="rounded-xl border border-border bg-muted/30 p-4">
             <Switch
@@ -242,7 +244,7 @@ export function DumpsPane({ state }: PaneProps) {
         footer={
           <>
             <Button variant="ghost" onClick={() => setConfirmClear(false)}>{t('common.cancel')}</Button>
-            <Button variant="danger" disabled={busyAll} onClick={() => void run({ op: 'clear' })}>
+            <Button variant="danger" disabled={busyAll} onClick={() => void run({ op: 'clear', confirm: true })}>
               <Trash2 className="size-3.5" aria-hidden="true" />
               {t('common.clear')}
             </Button>

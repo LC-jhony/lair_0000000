@@ -1,6 +1,10 @@
 import type {
   DaemonClient,
   JobStatus,
+  QueueInfo,
+  ServiceHealth,
+  SiteData,
+  SiteStack,
   LairStatus,
   WebConfigPayload,
   WebOp,
@@ -13,6 +17,7 @@ import type {
   MailResult,
   DumpsPayload,
   DumpsResult,
+  DBResult,
   DebuggerPayload,
   DebuggerResult,
   LogSource,
@@ -77,6 +82,11 @@ export const ACTIONS = {
   job: 'job',
   jobs: 'jobs',
   cancelJob: 'job-cancel',
+  queue: 'queue',
+  servicesHealth: 'services-health',
+  siteData: 'site-data',
+  siteStack: 'site-stack',
+  worktree: 'worktree',
   log: 'logs',
   logsList: 'logs-list',
   mail: 'mail',
@@ -90,6 +100,7 @@ export const ACTIONS = {
   uninstallService: 'service-uninstall',
   ensureDatabase: 'ensure-database',
   createDB: 'create-db',
+  db: 'db',
   setDefaultDB: 'db-default',
   park: 'park',
   link: 'link',
@@ -234,6 +245,22 @@ export class HttpDaemonClient implements DaemonClient {
     return this.call<JobStatus[]>(ACTIONS.jobs);
   }
 
+  queue(name: string) {
+    return this.call<QueueInfo>(ACTIONS.queue, { name });
+  }
+
+  servicesHealth() {
+    return this.call<ServiceHealth[]>(ACTIONS.servicesHealth);
+  }
+
+  siteData(name: string) {
+    return this.call<SiteData>(ACTIONS.siteData, { name });
+  }
+
+  siteStack(name: string) {
+    return this.call<SiteStack>(ACTIONS.siteStack, { name });
+  }
+
   cancelJob(id: string) {
     return this.call<{ canceled?: boolean }>(ACTIONS.cancelJob, { id });
   }
@@ -302,6 +329,10 @@ export class HttpDaemonClient implements DaemonClient {
     return result.text ?? '';
   }
 
+  async db(payload: Record<string, unknown>) {
+    return this.call<DBResult>(ACTIONS.db, payload);
+  }
+
   async setDefaultDB(id: string) {
     await this.call(ACTIONS.setDefaultDB, { id });
   }
@@ -343,8 +374,11 @@ export class HttpDaemonClient implements DaemonClient {
     return this.call<WebResult>(ACTIONS.web, { op, ...payload });
   }
 
-  projectInfo() {
-    return this.call<ProjectInfo>(ACTIONS.project, { op: 'info' });
+  async projectInfo(): Promise<ProjectInfo> {
+    // The daemon action returns { info: ProjectInfo }; FakeDaemon returns the
+    // object directly. Accept both so the wizard sees the real defaults.
+    const result = await this.call<ProjectInfo & { info?: ProjectInfo }>(ACTIONS.project, { op: 'info' });
+    return result.info ?? result;
   }
 
   projectCreate(payload: ProjectCreatePayload) {

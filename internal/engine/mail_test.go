@@ -221,7 +221,10 @@ func TestMailSMTPLifecycle(t *testing.T) {
 		t.Fatalf("wrong port in env: %q", status.Env)
 	}
 
-	cleared, err := e.MailControl(ctx, MailRequest{Op: "clear"})
+	if _, err := e.MailControl(ctx, MailRequest{Op: "clear"}); err == nil {
+		t.Fatal("clear without confirm accepted")
+	}
+	cleared, err := e.MailControl(ctx, MailRequest{Op: "clear", Confirm: true})
 	if err != nil {
 		t.Fatal(err)
 	}

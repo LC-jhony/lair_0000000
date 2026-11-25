@@ -345,17 +345,17 @@ func TestSiteControlOpenChecksDNSAndRefreshesAppURL(t *testing.T) {
 	}
 }
 
-func TestSiteControlOpenReportsDNSRepairCommand(t *testing.T) {
+func TestSiteControlOpenDoesNotDependOnGoDNS(t *testing.T) {
 	e, _ := testEnv(t)
 	_ = linkTestSite(t, e, "missing.lair.invalid")
-	_, err := e.SiteControl(context.Background(), SiteRequest{Op: "open", Name: "missing.lair.invalid"})
-	if err == nil {
-		t.Fatal("open accepted a host that does not resolve")
+	// The browser resolves the host with the system resolver; a Go-side lookup
+	// must not block opening a perfectly registered site.
+	res, err := e.SiteControl(context.Background(), SiteRequest{Op: "open", Name: "missing.lair.invalid"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, want := range []string{"setup-privileged.sh", "getent hosts missing.lair.invalid"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("error = %q, missing %q", err, want)
-		}
+	if res.URL == "" {
+		t.Fatal("open returned no URL")
 	}
 }
 
@@ -546,6 +546,72 @@ func TestDetectSiteRoot(t *testing.T) {
 
 	if got := detectSiteRoot(filepath.Join(t.TempDir(), "does-not-exist")); got.state != "missing" {
 		t.Fatalf("missing path = %+v", got)
+	}
+}
+
+func TestSiteEnvRevealIsExplicit(t *testing.T) {
+	e, _ := testEnv(t)
+	dir := linkTestSite(t, e, "blog.test")
+	writeTestFile(t, filepath.Join(dir, ".env"), "APP_URL=http://blog.test\nDB_PASSWORD=hunter2\n")
+
+	defaultResult, err := e.SiteControl(context.Background(), SiteRequest{Op: "env", Name: "blog.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(mustJSON(t, defaultResult), "hunter2") || defaultResult.Value != "" {
+		t.Fatalf("default env leaked the secret: %+v", defaultResult)
+	}
+
+	revealed, err := e.SiteControl(context.Background(), SiteRequest{
+		Op: "env", Name: "blog.test", Key: "DB_PASSWORD", Reveal: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revealed.Value != "hunter2" {
+		t.Fatalf("revealed = %q", revealed.Value)
+	}
+	if len(revealed.Env) != 0 {
+		t.Fatalf("reveal must not also return the env list: %+v", revealed)
+	}
+}
+
+func TestSetSiteHTTPSOffStaysOff(t *testing.T) {
+	e, _ := testEnv(t)
+	name := "blog.test"
+	linkTestSite(t, e, name)
+	if err := e.SetSiteHTTPS(name, false); err != nil {
+		t.Fatal(err)
+	}
+	// A later config sync must not re-issue the certificate we just removed.
+	e.syncWeb()
+	cert := filepath.Join(e.Paths.Certs, name+".pem")
+	if _, err := os.Stat(cert); !os.IsNotExist(err) {
+		t.Fatalf("certificate was recreated after HTTPS off: %v", err)
+	}
+	c, err := e.Config.View()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Sites[name].Secure == nil || *c.Sites[name].Secure {
+		t.Fatalf("secure flag = %+v", c.Sites[name].Secure)
+	}
+}
+
+func TestSiteProfileDetectsFrameworks(t *testing.T) {
+	for _, tc := range []struct {
+		name, marker, framework string
+	}{
+		{"wordpress", "wp-config.php", "wordpress"},
+		{"joomla", "configuration.php", "joomla"},
+		{"codeigniter", "spark", "codeigniter"},
+	} {
+		dir := t.TempDir()
+		writeTestFile(t, filepath.Join(dir, tc.marker), "// marker")
+		framework, docRoot, front := siteProfile(dir)
+		if framework != tc.framework || docRoot != dir || front != "index.php" {
+			t.Fatalf("%s profile = %q %q %q", tc.name, framework, docRoot, front)
+		}
 	}
 }
 

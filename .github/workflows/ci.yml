@@ -33,8 +33,15 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
-      - name: go build
-        run: go build -o lair ./cmd/lair
+      - name: make build
+        run: make build
+
+      - name: binary reports version
+        run: ./lair version | grep -E '^lair '
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        continue-on-error: true
 
   app:
     name: App nativa (Node 22)
@@ -67,15 +74,6 @@ jobs:
 
       - name: actions:check
         run: npm run actions:check
-
-      - name: tui:typecheck
-        run: npm run tui:typecheck
-
-      - name: tui:build
-        run: npm run tui:build
-
-      - name: embedded TUI bundle is current
-        run: git diff --exit-code -- ../internal/assets/tui.mjs ../internal/assets/tui.go
 
       - name: build
         run: npm run build

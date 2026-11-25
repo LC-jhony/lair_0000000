@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,6 +34,9 @@ type SiteRequest struct {
 	Value       string   `json:"value"`
 	Domains     []string `json:"domains"`
 	DeleteFiles bool     `json:"delete_files"`
+	// Reveal is an explicit, per-key opt-in for reading a masked .env value.
+	// It is never implied by `env` and is only honoured for one key per call.
+	Reveal bool `json:"reveal,omitempty"`
 	// Enabled is a pointer so a missing field can be told apart from an
 	// explicit false on the set-enabled operation.
 	Enabled *bool `json:"enabled,omitempty"`
@@ -49,6 +51,9 @@ type SiteResult struct {
 	Output  string         `json:"output,omitempty"`
 	URL     string         `json:"url,omitempty"`
 	Config  string         `json:"config,omitempty"`
+	// Value is populated only by an explicit `env` + `reveal` request for one
+	// key. It is never included in detail/status/logs.
+	Value string `json:"value,omitempty"`
 }
 
 // SiteDetail is a read-only view of one parked site assembled from config,
@@ -98,7 +103,7 @@ var (
 	envKeyRE    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 
-// SiteControl implements the single daemon action used by desktop, TUI and CLI
+// SiteControl implements the single daemon action used by desktop and CLI
 // for per-site detail and maintenance. It never returns secret values.
 func (e *Engine) SiteControl(ctx context.Context, req SiteRequest) (SiteResult, error) {
 	if err := ctx.Err(); err != nil {
@@ -159,6 +164,19 @@ func (e *Engine) SiteControl(ctx context.Context, req SiteRequest) (SiteResult, 
 		}
 		return SiteResult{Config: text}, nil
 	case "env":
+		if req.Reveal {
+			// Expose exactly one key, only when the caller asks for it. The
+			// default `env` operation keeps masking secrets as before.
+			key := strings.TrimSpace(req.Key)
+			if !envKeyRE.MatchString(key) {
+				return SiteResult{}, fmt.Errorf("%w: %q", ErrInvalidEnvKey, req.Key)
+			}
+			values, _, err := readEnvFile(filepath.Join(site.Path, ".env"))
+			if err != nil {
+				return SiteResult{}, err
+			}
+			return SiteResult{Value: values[key]}, nil
+		}
 		entries, err := siteEnvEntries(site.Path)
 		if err != nil {
 			return SiteResult{}, err
@@ -186,7 +204,7 @@ func (e *Engine) SiteControl(ctx context.Context, req SiteRequest) (SiteResult, 
 		}
 		return result, nil
 	case "domains":
-		// An omitted `domains` field is a read (the TUI loads it alongside
+		// An omitted `domains` field is a read (the desktop loads it alongside
 		// detail/env); an explicit [] clears the aliases.
 		if req.Domains == nil {
 			return SiteResult{Domains: append([]string(nil), site.Domains...)}, nil
@@ -218,7 +236,7 @@ func (e *Engine) SiteControl(ctx context.Context, req SiteRequest) (SiteResult, 
 
 // SiteVHost renders the site's server block with the current web settings and
 // filesystem state. It never writes to disk and includes disabled sites so the
-// desktop/TUI vhost preview keeps working while a site is turned off.
+// desktop vhost preview keeps working while a site is turned off.
 func (e *Engine) SiteVHost(name string) (string, error) {
 	name = normalizeSiteName(name)
 	if name == "" {
@@ -291,6 +309,11 @@ func (e *Engine) deleteSite(name string, site config.Site, deleteFiles bool) err
 	}
 
 	if deleteFiles {
+		// A site's SQLite database lives inside its folder: snapshot it first
+		// so a mistaken unlink with --delete-files can be undone.
+		if err := e.autoSnapshotSite(context.Background(), name); err != nil {
+			return err
+		}
 		info, err := os.Lstat(registered)
 		if err != nil {
 			return fmt.Errorf("estado de %s: %w", registered, err)
@@ -410,7 +433,7 @@ func (e *Engine) siteDetail(c *config.Config, name string, site config.Site) *Si
 	}
 	detect := detectSiteRoot(site.Path)
 	typ, framework := detectProjectType(site.Path)
-	secure := regularFile(filepath.Join(e.Paths.Certs, name+".pem"))
+	secure := e.siteIsSecure(name, site)
 	phpValue, phpSource, phpFile := e.phpSelection(c, site)
 	nodeValue, nodeSource, nodeFile := e.nodeSelection(c, site)
 
@@ -446,8 +469,9 @@ func (e *Engine) siteDetail(c *config.Config, name string, site config.Site) *Si
 // refreshes APP_URL in the project's .env with the real web settings.
 func (e *Engine) siteOpen(name string, site config.Site) (SiteResult, error) {
 	host := strings.TrimSuffix(name, ".")
-	_, certErr := os.Stat(filepath.Join(e.Paths.Certs, name+".pem"))
-	secure := certErr == nil
+	// HTTPS is only offered when it is enabled for the site AND a certificate
+	// actually exists; otherwise the link would open a TLS handshake failure.
+	secure := e.siteIsSecure(name, site) && regularFile(filepath.Join(e.Paths.Certs, name+".pem"))
 	s := e.WebSettings()
 	scheme, port := "http", s.HTTPPort
 	if secure && s.HTTPS {
@@ -464,18 +488,19 @@ func (e *Engine) siteOpen(name string, site config.Site) (SiteResult, error) {
 		}
 	}
 
-	if _, err := net.LookupHost(host); err != nil {
-		script := filepath.Join(e.Paths.Root, "setup-privileged.sh")
-		return SiteResult{}, fmt.Errorf(
-			"%s no resuelve en este equipo (%v). Solución: sudo %s y comprueba con 'getent hosts %s'",
-			host, err, script, host)
-	}
+	// Do not gate the link on a Go-side DNS lookup: the system resolver and the
+	// browser can disagree (systemd-resolved stub timeouts, DoH, cached NXDOMAIN).
+	// Return the URL and let the browser report a real resolution failure.
 	return SiteResult{URL: url, Output: url}, nil
 }
 
 func (e *Engine) siteURL(name string, secure bool, env map[string]string) string {
+	// APP_URL is informational and can be stale after an HTTPS toggle. Follow
+	// it only when its scheme matches the site's authoritative secure flag.
 	if value := strings.TrimSpace(env["APP_URL"]); value != "" {
-		return value
+		if strings.HasPrefix(value, "https://") == secure {
+			return value
+		}
 	}
 	s := e.WebSettings()
 	scheme, port := "http", s.HTTPPort
@@ -568,6 +593,16 @@ func nodeFromPackage(sitePath string) string {
 }
 
 func detectProjectType(sitePath string) (typ, framework string) {
+	if regularFile(filepath.Join(sitePath, "wp-config.php")) {
+		return "php", "wordpress"
+	}
+	if regularFile(filepath.Join(sitePath, "configuration.php")) ||
+		(directoryExists(filepath.Join(sitePath, "installation")) && directoryExists(filepath.Join(sitePath, "administrator"))) {
+		return "php", "joomla"
+	}
+	if regularFile(filepath.Join(sitePath, "spark")) || regularFile(filepath.Join(sitePath, "app", "Config", "Database.php")) {
+		return "php", "codeigniter"
+	}
 	if regularFile(filepath.Join(sitePath, "artisan")) {
 		return "laravel", "laravel"
 	}
@@ -596,6 +631,46 @@ func detectProjectType(sitePath string) (typ, framework string) {
 		}
 	}
 	return typ, framework
+}
+
+// siteProfile detects the document root and front controller for supported
+// PHP projects. WordPress and Joomla serve from the project root; Symfony and
+// CodeIgniter can use public/ or web/ depending on the generation.
+func siteProfile(sitePath string) (framework, docRoot, front string) {
+	docRoot = filepath.Join(sitePath, "public")
+	front = "index.php"
+	if regularFile(filepath.Join(sitePath, "artisan")) {
+		return "laravel", docRoot, front
+	}
+	if regularFile(filepath.Join(sitePath, "wp-config.php")) {
+		return "wordpress", sitePath, "index.php"
+	}
+	// Before installation Joomla has no configuration.php; its installer and
+	// administrator directories are already present at the project root.
+	if regularFile(filepath.Join(sitePath, "configuration.php")) ||
+		(directoryExists(filepath.Join(sitePath, "installation")) && directoryExists(filepath.Join(sitePath, "administrator"))) {
+		return "joomla", sitePath, "index.php"
+	}
+	if regularFile(filepath.Join(sitePath, "spark")) || regularFile(filepath.Join(sitePath, "app", "Config", "Database.php")) {
+		if regularFile(filepath.Join(sitePath, "public", "index.php")) {
+			return "codeigniter", docRoot, front
+		}
+		return "codeigniter", sitePath, "index.php"
+	}
+	if regularFile(filepath.Join(sitePath, "composer.json")) {
+		data, _ := os.ReadFile(filepath.Join(sitePath, "composer.json"))
+		if strings.Contains(strings.ToLower(string(data)), `"symfony/framework-bundle"`) {
+			if regularFile(filepath.Join(sitePath, "public", "index.php")) {
+				return "symfony", docRoot, front
+			}
+			candidate := filepath.Join(sitePath, "web", "app.php")
+			if regularFile(candidate) {
+				return "symfony", filepath.Join(sitePath, "web"), "app.php"
+			}
+			return "symfony", filepath.Join(sitePath, "web"), "index.php"
+		}
+	}
+	return "", docRoot, front
 }
 
 type rootDetection struct {
@@ -635,8 +710,13 @@ func detectSiteRoot(sitePath string) rootDetection {
 	if regularFile(filepath.Join(sitePath, "index.php")) {
 		detected.state = "ok"
 		detected.root = sitePath
-		detected.notice = "index.php está en la raíz; nginx espera public/index.php"
-		detected.suggestions = []string{"Mueve index.php a public/ o ajusta la raíz del documento."}
+		// WordPress, Joomla and CodeIgniter serve legitimately from the root;
+		// the public/ suggestion only applies to Laravel-style projects.
+		framework, _, _ := siteProfile(sitePath)
+		if framework == "" {
+			detected.notice = "index.php está en la raíz; este proyecto espera public/index.php"
+			detected.suggestions = []string{"Mueve index.php a public/ o ajusta la raíz del documento."}
+		}
 		return detected
 	}
 	entries, err := os.ReadDir(sitePath)
@@ -654,4 +734,9 @@ func detectSiteRoot(sitePath string) rootDetection {
 func regularFile(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular()
+}
+
+func directoryExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

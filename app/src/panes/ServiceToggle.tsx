@@ -15,7 +15,7 @@ interface ServiceToggleProps {
   state: LairController;
 }
 
-/** Same semantics as the TUI: stop a running service, restart a stopped one. */
+/** Stop a running service, restart a stopped one. */
 export function ServiceToggle({ id, service, state }: ServiceToggleProps) {
   const t = useT();
   const [confirm, setConfirm] = useState(false);

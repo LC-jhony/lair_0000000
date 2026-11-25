@@ -6,12 +6,14 @@ La CLI detecta automáticamente el daemon: si `run/api.sock` responde y `run/api
 |---|---|
 | `lair install` | Bootstrap local (Composer verificado, shims, perfiles, CA), instalación inicial de PHP, Node LTS y SQLite con progreso, y generación de los scripts privilegiados (DNS/host virtual) para revisión. Sin catálogo/red avisa, pero no aborta. |
 | `lair uninstall [--delete-data]` | Elimina PHP, Composer, Node, todos los servicios (MariaDB incluido), shims, PATH y CA local; genera el script de reversión. Las bases de datos se conservan salvo `--delete-data`. No instala ni elimina paquetes del sistema; solo limpia la configuración y los datos generados bajo `$LAIR_HOME`. |
+| `lair version` (o `lair --version`, `-V`) | Versión, commit y fecha de compilación del binario; no conecta con el daemon. |
 | `lair status [--json]` | Estado de PHP, Node, servicios, sitios, jobs y defaults. |
-| `lair doctor [--fix]` | Comprueba si `<LAIR_HOME>/bin` está en PATH, qué shims faltan y qué versiones hay instaladas. Con `--fix` regenera los shims y los fragmentos de PATH. |
+| `lair doctor [--fix] [--dry-run]` | Comprueba si `<LAIR_HOME>/bin` está en PATH, qué shims faltan y qué versiones hay instaladas. Con `--fix` regenera los shims y los fragmentos de PATH; `--dry-run` solo simula la reparación. |
 | `lair restart` | Reinicia todos los servicios supervisados activos. |
 | `lair update` | Fuerza el refresco del catálogo firmado. |
 | `lair php install [version] [--from <dir\|.tar.gz\|.zip>]` | Instala una línea minor (p. ej. `8.4`) o una versión exacta; con `--from`, un build local detectado ejecutando el binario. |
 | `lair php list` | Versiones instaladas; `*` marca la default. |
+| `lair php detect [dir]` | Lee `.php-version` o `require.php` de `composer.json` y recomienda la minor instalada más nueva que satisfaga la restricción (`^`, `>=`, `~`, comodines y alternativas `\|\|`). |
 | `lair php use <minor>` / `lair use <minor>` | Cambia la default. |
 | `lair php uninstall <minor>` | Quita un minor (nunca la default; conserva otros minor). |
 | `lair node install [version] [--from <dir\|.tar.gz>]` / `list` / `default <major>` | Instala la última release publicada de la mayor (`22`, `22.11` y `22.11.0` resuelven igual). Sin versión instala la LTS más nueva del catálogo. |
@@ -26,6 +28,8 @@ La CLI detecta automáticamente el daemon: si `run/api.sock` responde y `run/api
 | `lair project migrate-dirs` (alias `lair migrate-dirs`) | Migra `~/lair` a `~/Lair` (mueve los proyectos y actualiza las rutas). No es automático: el arranque solo sincroniza las carpetas ya configuradas. |
 | `lair project import-valet` (alias `lair import-valet`) | Importa en **solo lectura** `~/.valet/config.json` y `~/.valet/Sites`: añade las rutas a `project_dirs` y adopta el dominio; no modifica esos archivos ni instala/ejecuta Valet. Los sitios aparecen tras `lair project sync`. |
 | `lair project info` | Muestra capacidades para crear proyectos: instalador Laravel, PHP, Composer, Node (nvm), drivers PDO, gestores Node, motores de BD y carpeta de proyectos. |
+| `lair worktree list\|sync\|prune` | Lista, registra desde git o limpia los sitios creados desde worktrees. El registro automático al arrancar el daemon es opcional (`worktrees.auto`). |
+| `lair worktree provision <path>` | Registra un worktree concreto bajo su dominio de rama (sin modificar git). |
 | `lair project dir [path]` | Muestra o fija la carpeta de proyectos por defecto. Por defecto `~/Lair` (**L mayúscula**); se rechaza cualquier ruta dentro de `$LAIR_HOME`. Atajo de `lair project dirs default`. |
 | `lair project dirs [list\|add <path>\|remove <path>\|default <path>]` | Gestiona **ProjectDirs**: lista, añade, quita o fija la carpeta por defecto donde se escanean proyectos. |
 | `lair migrate-dirs` | Migra `~/lair` a `~/Lair` de forma explícita; no se ejecuta automáticamente al arrancar. |
@@ -38,21 +42,26 @@ La CLI detecta automáticamente el daemon: si `run/api.sock` responde y `run/api
 | `lair services update <id> [ver]` | Instala, activa y reinicia. |
 | `lair services uninstall <id> [ver] [--delete-data]` | Elimina la instalación; datos preservados por defecto. |
 | `lair services create-db <id> <name>` | Ejecuta el comando de creación de BD del servicio. |
+| `lair db snapshots [sitio]` | Lista los snapshots guardados en `<LAIR_HOME>/snapshots` (con SHA-256). |
+| `lair db snapshot [sitio]` | Crea un snapshot de la BD del sitio (desde `.env`: sqlite, pgsql o MariaDB/MySQL). |
+| `lair db restore <sitio> <id> [--yes]` | Restaura un snapshot tras crear **otro snapshot previo** automático. Requiere `--yes`. |
+| `lair db import <sitio> <archivo> [--yes]` | Importa un dump desde un archivo bajo `~/` o `snapshots/`; también hace snapshot previo. |
+| `lair db export <sitio> [archivo]` | Exporta la BD a `snapshots/` o a la ruta indicada. |
 | `lair services default sqlite\|mariadb\|mysql\|postgres` | Fija la base de datos predeterminada (SQLite en una instalación nueva). |
 | `lair services restart\|stop <id>` | Controla el supervisor de un servicio. |
 | `lair park` | Registra el directorio actual como `<nombre>.test`. |
 | `lair link <name> [path]` | Registra un sitio con host explícito. |
-| `lair unlink <name>` | Quita un sitio del router sin tocar los archivos. Para borrar también la carpeta usa la acción `site` (`op: delete`, `delete_files: true`) o la tecla `X` de la TUI, con confirmación en la interfaz. |
+| `lair unlink <name>` | Quita un sitio del router sin tocar los archivos. Para borrar también la carpeta usa la acción `site` (`op: delete`, `delete_files: true`) , con confirmación en la interfaz. |
 | `lair secure [name]` | Emite certificado local para el sitio (y su wildcard). |
 | `lair pin php\|node\|root <value>` | Escribe `.lairrc` en el proyecto (versionable). `root=` selecciona un data root alternativo. Los proyectos con `.flockrc` siguen funcionando y se migran al pinar. |
 | `lair unpin php\|node\|root` | Quita el pin del proyecto sin borrar otras líneas. |
 | `lair isolate php\|node <version\|--off>` / `unisolate` / `isolated` | Fija una versión para un sitio aparcado (config.json, prioridad máxima), la quita o la muestra. |
 | `lair logs [name]` | Muestra un log o lista los disponibles. |
 | `lair desktop` (alias `lair ui`) | Muestra los datos de conexión de la app nativa. Arranca el daemon si hace falta y lee `run/desktop.url` y `run/desktop.token`. |
-| `lair tui` / `lair dashboard` | Dashboard interactivo. Usa el bundle **React/Ink + termcn** incrustado (diez panes, mismo i18n que la desktop) y cae al panel **Charm v2** (Bubble Tea, Bubbles, Lip Gloss, Huh, Glamour, Log y Harmonica; nueve panes) si Node 22+ no está disponible. `lair tui --help` muestra la ayuda markdown. Fuera de un TTY imprime el estado en texto plano y sale. |
+| `lair tui` / `lair dashboard` | Dashboard interactivo a pantalla completa (Charm v2): diez panes, paleta `ctrl+p`, formularios de instalación y creación de proyectos, ratón y atajos. Requiere TTY; `lair tui --help` muestra la ayuda resumida. |
 | `lair daemon --foreground` (`-f`) | Ejecuta el daemon en primer plano. Flags: `--no-web`, `--no-dns`, `--no-api`, `--no-desktop`, `--desktop-port N`, `--dns-port`, `--http-port`, `--https-port`, `--domain` (alias: `--no-ui`, `--ui-port N`). Web escucha en 80/443 por defecto (usa `--http-port 8080 --https-port 8443` si no hay `CAP_NET_BIND_SERVICE`); DNS en `--dns-port 53535`. |
 
-> La acción `web` del daemon expone las operaciones `status`, `configure`, `https-on` y `https-off`; la CLI, la desktop y la TUI son clientes de esa misma acción.
+> La acción `web` del daemon expone las operaciones `status`, `configure`, `https-on` y `https-off`; la CLI y la desktop son clientes de esa misma acción.
 
 ## ProjectDirs, migración e importación de Valet
 
@@ -67,7 +76,7 @@ El estado persistente incluye **`project_dirs`**, un **array** de carpetas escan
 - Si existe `~/lair`, usa `lair migrate-dirs` de forma explícita para mover los proyectos; el arranque del daemon solo sincroniza las carpetas configuradas. La carpeta antigua no se borra sin confirmación.
 - `lair import-valet` lee `~/.valet/config.json` y `~/.valet/Sites` **en solo lectura**: añade esas rutas a `project_dirs` y adopta el dominio, sin escribir en esos archivos ni instalar/ejecutar Valet. Valet nunca se ejecuta como root; los sitios se registran tras `lair project sync`.
 
-Estas operaciones son valores del campo `op` de la acción `project` del daemon (el inventario compartido tiene 49 acciones):
+Estas operaciones son valores del campo `op` de la acción `project` del daemon (el inventario compartido tiene 55 acciones):
 
 | `op` | Campos | Equivalente CLI |
 | --- | --- | --- |
@@ -91,40 +100,9 @@ dig @127.0.0.1 -p 53535 mi-app.test
 lair status && lair doctor
 ```
 
-## Dashboard TUI
+## Dashboard de terminal (`lair tui`)
 
-`lair tui` muestra un layout de dos paneles con bordes redondeados: navegación a la
-izquierda y tarjetas de estado a la derecha. En la sección **Servicios**, cada
-tarjeta tiene un interruptor; `enter` o `space` abre una confirmación (Huh) y
-aplica `service-restart` para activar o `service-stop` para desactivar.
-
-| Tecla | Acción |
-| --- | --- |
-| `1`–`9` / `tab` / `→` / `l` | Ir directo al pane / siguiente sección |
-| `←` / `h` | Sección anterior |
-| `↑` / `↓` | Seleccionar servicio |
-| `enter` / `space` | Activar o desactivar el servicio seleccionado |
-| `I` / `n` / `p` / `m` | Instalar servicio / Node LTS / PHP / MariaDB |
-| `d` / `y` / `z` / `b` | Predeterminada / usar versión / desinstalar / crear base de datos |
-| **`M` / `D` / `B`** | **Mail / Dumps / Debugger** (mayúsculas; no confundir con `m`/`d`/`b`) |
-| `v` / `x` | Ver registros / cancelar trabajo |
-| `a` / `e` / `o` / `c` / `C` / `g` / `i` | Aparcar / enlazar / desvincular / certificado / nuevo proyecto Laravel / fijar / aislar |
-| **`E`** / **`X`** | **Detalle de sitio** (Overview + Environment, vía `site`) / **borrar sitio** con confirmación de carpeta |
-| **`V`** / **`t`** | **Ver el vhost generado** del sitio seleccionado (`op: config`) / **alternar enabled/disabled** desde el detalle `E` (`op: set-enabled`, con confirmación) |
-| **`F`** | **Project dirs**: listar/añadir/quitar/fijar carpetas de proyectos (`~/Lair` por defecto) y ejecutar `migrate-dirs` o `import-valet` (acciones `project`) |
-| `u` / `s` / `r` | Catálogo / reiniciar servicios / refrescar |
-| `?` | Ayuda markdown renderizada con Glamour |
-| `q` / `esc` / `ctrl+c` | Salir |
-
-Los panes del bundle React/Ink son **Resumen**, Runtimes, Bases de datos, Servicios, Sitios, **Correo**, **Dumps**, **Depurador**, **Logs** y **Sistema**. El fallback de Charmbracelet tiene **nueve**: no incluye Logs, y `v` consulta los registros desde cualquier pane. Al igual que en la desktop, son panes del sidebar: no hay ventanas flotantes ni bandeja nativa. `1`–`9` salta al pane y `I` abre la instalación de servicios; el pane **Logs** añade el filtro por `sources`. En el pane **Sitios**, la tecla **`E`** (mayúscula) abre un subconjunto del detalle de la desktop —Overview (URL, rutas, PHP, Node, BD, HTTPS, estado de `root`, dominios, avisos) y Environment (valores secretos enmascarados)— reutilizando la acción `site`; `v` abre los registros del sitio. No se confunde con `e` (enlazar sitio). La tecla **`X`** pide confirmación para desvincular el sitio y permite borrar también su carpeta (`delete_files: true`). La tecla **`V`** (mayúscula, distinta de `v` = registros) muestra el **virtual host generado** para el sitio seleccionado, con el mismo contenido que el botón **View generated vhost** del Overview en la desktop (`op: config`). La tecla **`t`** (solo desde el detalle `E`) alterna el estado **enabled/disabled** del sitio (con confirmación) llamando a `site` con `op: set-enabled`: un sitio desactivado no genera vhost y se retira del router web Go. La tecla **`F`** abre la gestión de **ProjectDirs** (carpetas de proyectos, `~/Lair` por defecto, con `migrate-dirs` e `import-valet`), sin alterar la página Sites.
-
-La app desktop expone exactamente las mismas acciones; el cliente HTTP declara la
-misma lista en `app/src/api/client.ts` y `scripts/check-actions.mjs` verifica que
-cada acción exista en `internal/daemon/protocol.go`.
-
-La ayuda completa vive en `internal/cli/tui_help.md` y puede verse fuera de la TUI
-con `glow internal/cli/tui_help.md`. Las acciones se registran en
-`<LAIR_HOME>/log/tui.log`. Para grabar una demo: `vhs scripts/tui-demo.tape`.
+`lair tui` y `lair dashboard` abren el panel interactivo implementado en `internal/tui/`. Todas sus acciones pasan por `daemon.Caller`, el mismo contrato que usan la CLI y la app de escritorio; las acciones destructivas quedan fuera de la TUI. `app/scripts/check-actions.mjs` verifica que cada acción exista en `internal/daemon/protocol.go`.
 
 ## Acciones de soporte: Mail, Dumps, Debugger y Logs
 
@@ -161,7 +139,7 @@ Ejemplos de sobre enviado al bridge:
 
 Los nombres de origen de los ejemplos son ilustrativos; la lista autoritativa de acciones y payloads es `internal/daemon/protocol.go`.
 
-También están disponibles las formas abreviadas `lair logs [nombre]` para leer un registro y el filtro por `sources` desde el pane Logs de la TUI (`v`).
+También están disponibles las formas abreviadas `lair logs [nombre]` para leer un registro y el filtro por `sources` desde el pane Logs de la desktop.
 
 ## Acción `site`: detalle avanzado de sitios
 
@@ -184,17 +162,17 @@ La página **Sites** de la desktop abre un detalle con **siete pestañas**: **Ge
 | `env-set` | `name`, `key`, `value` | `output`: solo el nombre de la clave; el valor nunca se registra. |
 | `domains` | `name`, `domains` | `domains`: lista normalizada; actualiza `config.json` y recarga sitios/web. |
 | `set-enabled` | `name`, `enabled` | `detail`: vista actualizada con el nuevo `enabled`; aplica sitios/web. Con `enabled: false` se retira el host virtual del router. |
-| `config` | `name` | `config`: texto del vhost generado (lo que muestra la TUI con `V`); vacío si el sitio está desactivado. |
+| `config` | `name` | `config`: texto del vhost generado (lo que muestra la desktop con **View generated vhost**); vacío si el sitio está desactivado. |
 | `delete` / `unlink` | `name`, `delete_files` | `output`: con `delete_files: true` borra también la carpeta. |
 
-La fuente autoritativa del contrato es `SiteRequest` / `SiteResult` en `internal/engine/site.go`, reexportada por `internal/daemon/protocol.go`. `SiteDetail` expone `enabled` y `root_state`; el router web Go usa esos campos para decidir si publica el host virtual o sirve **`not-configured.html`** (página genérica: host y ruta esperada del front controller dentro del proyecto, sin rutas de `LAIR_HOME` ni secretos) en lugar de pasar la petición a PHP-FPM, y `op: config` devuelve la definición de ese host virtual. El borrado de archivos valida la ruta registrada (absoluta, fuera de `LAIR_HOME`, sin enlaces simbólicos) y exige confirmación en la interfaz (TUI `X`); `lair unlink` sigue siendo no destructivo. La TUI expone un subconjunto con **`E`** (Overview + Environment), **`V`** (vhost generado) y el toggle de enabled/disabled. Los hosts virtuales se generan en el servidor Go integrado a partir de `config.json`, sin archivos de configuración externos ni enlaces en `/etc` (decisión registrada en el [ADR 009](adr/009-virtual-hosts-en-servidor-go.md)). La CLI no publica un subcomando `lair site`, se verifica con el bridge `POST /api` o el `Caller` en modo offline.
+La fuente autoritativa del contrato es `SiteRequest` / `SiteResult` en `internal/engine/site.go`, reexportada por `internal/daemon/protocol.go`. `SiteDetail` expone `enabled` y `root_state`; el router web Go usa esos campos para decidir si publica el host virtual o sirve **`not-configured.html`** (página genérica: host y ruta esperada del front controller dentro del proyecto, sin rutas de `LAIR_HOME` ni secretos) en lugar de pasar la petición a PHP-FPM, y `op: config` devuelve la definición de ese host virtual. El borrado de archivos valida la ruta registrada (absoluta, fuera de `LAIR_HOME`, sin enlaces simbólicos) y exige confirmación en la interfaz; `lair unlink` sigue siendo no destructivo. Los hosts virtuales se generan en el servidor Go integrado a partir de `config.json`, sin archivos de configuración externos ni enlaces en `/etc` (decisión registrada en el [ADR 009](adr/009-virtual-hosts-en-servidor-go.md)). La CLI no publica un subcomando `lair site`, se verifica con el bridge `POST /api` o el `Caller` en modo offline.
 
 ## Bridge de la app nativa
 
 No se sirve ninguna SPA. El daemon publica `POST /api` en `127.0.0.1:9797` (configurable con `--desktop-port N`) para la app Electron + React de `app/`.
 
 - Autenticación: cabecera `X-Lair-Token` (comparación en tiempo constante). Sin token responde `401`; los tokens en query ya no se aceptan. Solo se permiten orígenes HTTP(S) de `localhost`, `127.0.0.1` y `::1`; el origen `null` se rechaza. Electron llama desde el proceso principal, sin cabecera `Origin`.
-- Superficie: el `Dispatcher` registra **49 acciones**; el cliente desktop declara 43, verificadas por `scripts/check-actions.mjs`. Incluye `status`, `versions`, `update`, `bootstrap`, `first-run`, `ensure-shims`, `install-*`, `job`/`jobs`/`job-cancel`/`job-retry`, `logs`/`logs-list` (con `sources`), `php-use`/`php-uninstall`, `node-default`/`node-update`/`node-uninstall`, `composer-update`, `ext-*`, `npm-update`, `isolated`/`unpin`/`unisolate`, `service-*`, `create-db`/`db-default`/`ensure-database`, `park`/`link`/`unlink`/`secure`/`web`/`project`/`pin`/`isolate`/`site`, `mail`/`dumps`/`debugger` y `uninstall`. Fuera del cliente quedan `shutdown` y alguna acción interna de CLI/daemon. La app no calcula estados: adopta lo que devuelve el daemon.
+- Superficie: el `Dispatcher` registra **55 acciones**; las declaradas por el cliente desktop se verifican con `scripts/check-actions.mjs`. Incluye `status`, `versions`, `update`, `bootstrap`, `first-run`, `ensure-shims`, `install-*`, `job`/`jobs`/`job-cancel`/`job-retry`, `logs`/`logs-list` (con `sources`), `php-use`/`php-uninstall`, `node-default`/`node-update`/`node-uninstall`, `composer-update`, `ext-*`, `npm-update`, `isolated`/`unpin`/`unisolate`, `service-*`, `create-db`/`db-default`/`ensure-database`/`db`, `park`/`link`/`unlink`/`secure`/`web`/`project`/`pin`/`isolate`/`site`/`worktree`, `mail`/`dumps`/`debugger` y `uninstall`. Fuera del cliente quedan `shutdown` y alguna acción interna de CLI/daemon. La app no calcula estados: adopta lo que devuelve el daemon.
 - Archivos: `run/desktop.token` y `run/desktop.url`, ambos `0600` dentro de `run/` (`0700`). Se eliminan al apagar el daemon.
 - `window.lairDesktop.connect()` (IPC de Electron, `contextIsolation`) entrega la URL y el token al renderer sin exponer filesystem.
 - El bridge se desactiva con `lair daemon --foreground --no-desktop`. Para cambiar el puerto: reinicia el daemon con `--desktop-port N`; la app lee siempre `run/desktop.url`.
@@ -220,4 +198,4 @@ Variables de entorno relevantes:
 
 ## Shims y PATH
 
-`lair install` genera los shims en `<LAIR_HOME>/bin` y añade ese directorio al PATH antes de cualquier descarga. Cualquier comando `lair ... install` vuelve a generarlos al terminar, también cuando la instalación se lanza desde la app nativa o la TUI. Si `node -v` no se reconoce, ejecuta `lair doctor --fix`: regenera shims y PATH e indica cómo activarlo en la terminal actual.
+`lair install` genera los shims en `<LAIR_HOME>/bin` y añade ese directorio al PATH antes de cualquier descarga. Cualquier comando `lair ... install` vuelve a generarlos al terminar, también cuando la instalación se lanza desde la app nativa. Si `node -v` no se reconoce, ejecuta `lair doctor --fix`: regenera shims y PATH e indica cómo activarlo en la terminal actual.

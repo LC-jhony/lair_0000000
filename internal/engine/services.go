@@ -412,6 +412,11 @@ func (e *Engine) UninstallService(id, ver string, deleteData bool) error {
 		}
 	}
 	if deleteData {
+		// Snapshot every site served by this engine before its data directory
+		// is removed. The failure is authoritative: no silent data loss.
+		if err := e.autoSnapshotService(context.Background(), id); err != nil {
+			return err
+		}
 		if err := os.RemoveAll(services.DataPath(e.Paths, id, ver)); err != nil {
 			return err
 		}

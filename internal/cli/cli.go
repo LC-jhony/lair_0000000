@@ -9,11 +9,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/lair-sh/lair/internal/app"
 	"github.com/lair-sh/lair/internal/daemon"
 	"github.com/lair-sh/lair/internal/engine"
 	"github.com/lair-sh/lair/internal/manifest"
+	"github.com/lair-sh/lair/internal/mcp"
+	"github.com/lair-sh/lair/internal/tui"
+	buildversion "github.com/lair-sh/lair/internal/version"
 )
 
 // defaultBaseURLs are the signed-manifest mirrors, tried in order.
@@ -75,6 +79,25 @@ func (c *ctx) callContext(ctx context.Context, action string, payload, out any) 
 func (c *ctx) printf(format string, args ...any)  { fmt.Fprintf(c.out, format, args...) }
 func (c *ctx) eprintf(format string, args ...any) { fmt.Fprintf(c.errOut, format, args...) }
 
+// isCatalogError reports whether the daemon rejected an action because its
+// signed catalog was missing or empty. An old daemon process can survive an
+// upgrade, so callers ask it to refresh and retry before surfacing the error.
+func isCatalogError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "catalog is empty") || strings.Contains(msg, "no catalog loaded")
+}
+
+// orDash renders an empty value as an em dash in CLI output.
+func orDash(v string) string {
+	if v == "" {
+		return "—"
+	}
+	return v
+}
+
 // Run dispatches the CLI. It returns an error the main package renders.
 func Run(args []string) error {
 	return run(args, os.Stdout, os.Stderr)
@@ -88,6 +111,10 @@ func run(args []string, out, errOut io.Writer) error {
 	cmd, rest := args[0], args[1:]
 
 	// These commands do not need a daemon connection.
+	if cmd == "version" || cmd == "--version" || cmd == "-V" {
+		fmt.Fprintln(out, buildversion.String())
+		return nil
+	}
 	if cmd == "daemon" {
 		return runDaemon(rest, out, errOut)
 	}
@@ -100,8 +127,20 @@ func run(args []string, out, errOut io.Writer) error {
 	if cmd == "desktop" || cmd == "ui" {
 		return runDesktop(rest, out, errOut)
 	}
+	if cmd == "mcp" {
+		// stdout is the JSON-RPC channel: all diagnostics go to stderr.
+		c, err := newCtx(os.Stderr, os.Stderr)
+		if err != nil {
+			return err
+		}
+		return mcp.New(c.caller).Serve(context.Background(), os.Stdin, os.Stdout)
+	}
 	if cmd == "tui" || cmd == "dashboard" {
-		return runTUI(rest, out, errOut)
+		c, err := newCtx(out, errOut)
+		if err != nil {
+			return err
+		}
+		return tui.Run(rest, c.caller, out, errOut)
 	}
 
 	c, err := newCtx(out, errOut)
@@ -145,6 +184,10 @@ func run(args []string, out, errOut io.Writer) error {
 		return c.newProject(rest)
 	case "services", "service":
 		return c.services(rest)
+	case "db":
+		return c.db(rest)
+	case "worktree":
+		return c.worktree(rest)
 	case "park":
 		return c.park()
 	case "link":
@@ -207,14 +250,16 @@ func usage(w io.Writer) {
 	fmt.Fprint(w, `lair - native PHP/Laravel development environments
 
 Usage:
+  lair version                       Show the binary version, commit and build date
   lair install                       Install shims, Composer, CA and show the privileged setup plan
   lair uninstall [--delete-data]     Remove all Lair-installed runtimes, services and shims (databases kept unless --delete-data)
   lair status [--json]               Show PHP, Node, services, sites and jobs
-  lair doctor [--fix]                Diagnose (and repair) PATH, shims and installed tools
+  lair doctor [--fix] [--dry-run]     Diagnose (and repair) PATH, shims and installed tools
   lair restart                       Restart all supervised services
   lair update                        Refresh the signed binary catalog
   lair php install [v] [--from P]    Install a PHP minor (local dir/.tar.gz/.zip with --from)
   lair php list                      List installed PHP versions
+  lair php detect [dir]              Recommend a version from .php-version / composer.json
   lair php use <minor>               Set the default PHP minor line
   lair php uninstall <minor>         Remove a PHP minor (never the default)
   lair node install [v] [--from P]   Install the newest release of a Node major
@@ -227,6 +272,8 @@ Usage:
   lair job retry <id>                Retry a failed install job
   lair new <name> [options]           Create a Laravel project (canonical command; alias of project new)
   lair project info                  Show Laravel installer, runtimes and database capabilities
+  lair worktree list|sync|prune       Manage git worktree branch sites
+  lair worktree provision <path>      Register one worktree under its branch domain
   lair project dir [path]            Show or set the default folder for new sites (~/Lair)
   lair project dirs [list|add|remove|default]  Manage all project folders
   lair migrate-dirs [from to]        Move ~/lair to ~/Lair (or an explicit pair) and rewrite paths
@@ -240,6 +287,11 @@ Usage:
   lair services use <id> <version>   Change the active version
   lair services update <id> [ver]    Install newest, activate and restart
   lair services uninstall <id> [ver] [--delete-data]
+  lair db snapshots [sitio]            List database snapshots
+  lair db snapshot [sitio]             Create a snapshot (--auto for automatic)
+  lair db restore <sitio> <id> [--yes] Restore a snapshot (auto-snapshots first)
+  lair db import <sitio> <file> [--yes] Import a dump (auto-snapshots first)
+  lair db export <sitio> [file]        Export the current database
   lair services create-db <id> <name>
   lair services default sqlite|mariadb|mysql|postgres  Set the default database
   lair services restart|stop <id>
@@ -256,8 +308,9 @@ Usage:
   lair mail status|start|stop|list|clear [inbox]|open <id>|raw <id>|env  Local SMTP catcher
   lair dumps status|capture-on|capture-off|options|list|clear|ingest   PHP dumps
   lair debugger status|detect-on|detect-off|breakpoints-on|breakpoints-off
+  lair mcp                           Model Context Protocol server (JSON-RPC over stdio)
   lair desktop                       Show the local bridge details for the native app (alias: lair ui)
-  lair tui | lair dashboard          Interactive CLI dashboard (Charmbracelet)
+  lair tui | lair dashboard          Interactive terminal dashboard (full screen)
   lair daemon --foreground           Run the daemon in the foreground (--no-desktop, --desktop-port N)
 `)
 }

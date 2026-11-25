@@ -5,10 +5,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/lair-sh/lair/internal/daemon"
 )
+
+// confirmFlag removes the explicit-confirmation flags from a subcommand's
+// arguments. Destructive clear operations never run on a bare command.
+func confirmFlag(args []string) ([]string, bool) {
+	rest := make([]string, 0, len(args))
+	confirm := false
+	for _, arg := range args {
+		switch arg {
+		case "--yes", "-y", "--confirm":
+			confirm = true
+		default:
+			rest = append(rest, arg)
+		}
+	}
+	return rest, confirm
+}
 
 // dumpsFlags parses the argv-safe form used by the generated PHP agent: every
 // value is a separate argument, so no shell quoting is involved.
@@ -27,6 +44,14 @@ func dumpsFlags(args []string) (daemon.DumpsRequest, error) {
 		switch name {
 		case "--site":
 			req.Site = value
+		case "--request-id":
+			req.RequestID = value
+		case "--duration-ms":
+			ms, err := strconv.ParseFloat(value, 64)
+			if err != nil {
+				return req, fmt.Errorf("--duration-ms: %w", err)
+			}
+			req.DurationMS = ms
 		case "--type":
 			req.Type = value
 		case "--time":
@@ -51,9 +76,14 @@ func (c *ctx) dumps(args []string) error {
 		op = args[0]
 		args = args[1:]
 	}
+	var confirm bool
+	args, confirm = confirmFlag(args)
 	switch op {
 	case "status", "list", "clear", "capture-on", "capture-off":
 		req.Op = op
+		if op == "clear" {
+			req.Confirm = confirm
+		}
 	case "options":
 		req.Op = op
 		// Usage: lair dumps options queries,logs,views [show-in-page]
@@ -104,19 +134,22 @@ func (c *ctx) mail(args []string) error {
 	op, id := "status", ""
 	if len(args) > 0 {
 		op = args[0]
+		args = args[1:]
 	}
+	args, confirm := confirmFlag(args)
 	req := daemon.MailRequest{Op: op}
 	switch op {
 	case "status", "start", "stop", "list":
 	case "clear":
-		if len(args) > 1 {
-			req.Inbox = args[1]
+		req.Confirm = confirm
+		if len(args) > 0 {
+			req.Inbox = args[0]
 		}
 	case "message", "open", "raw":
-		if len(args) < 2 {
+		if len(args) < 1 {
 			return fmt.Errorf("usage: lair mail %s <id>", op)
 		}
-		id = args[1]
+		id = args[0]
 		req.ID = id
 		if op == "open" {
 			req.Op = "message"

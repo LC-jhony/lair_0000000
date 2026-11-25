@@ -52,7 +52,7 @@ func (m *CGIManager) Start(id, key, bin, addr, workDir string) error {
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
 	// Never write raw FPM/CGI stderr to the terminal: it may contain paths or
-	// credentials. Logs are handled by the daemon, not the TUI.
+	// credentials. Logs are handled by the daemon.
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	if err := cmd.Start(); err != nil {
 		cancel()

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Download, FileText, Info, RotateCw, Server } from 'lucide-react';
 import { activeVersion, installedVersions } from '../api';
+import type { ServiceHealth } from '../api';
 import {
   ActionsMenu,
   Badge,
@@ -67,6 +68,18 @@ export function ServicesPane({ state }: PaneProps) {
   const [installLine, setInstallLine] = useState('');
   const [installPort, setInstallPort] = useState(0);
   const [log, setLog] = useState<{ name: string; text: string } | null>(null);
+  const [health, setHealth] = useState<ServiceHealth[]>([]);
+
+  const checkHealth = useCallback(async () => {
+    if (!state.client) return;
+    try {
+      setHealth(await state.client.servicesHealth());
+    } catch {
+      setHealth([]);
+    }
+  }, [state.client]);
+
+  useEffect(() => { void checkHealth(); }, [checkHealth]);
 
   const linesFor = (id?: string): CatalogLineOption[] =>
     catalogIds
@@ -323,6 +336,33 @@ export function ServicesPane({ state }: PaneProps) {
           {t('services.summary', { installed: installed.length, total: visible.length })}
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="flex-row items-start justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base">{t('services.health')}</CardTitle>
+            <CardDescription>{t('services.healthHelp')}</CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => void checkHealth()}>
+            <RotateCw className="size-3.5" aria-hidden="true" />{t('dash.refresh')}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {health.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t('services.healthEmpty')}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {health.map((item) => (
+                <span key={item.id} title={item.detail}>
+                  <Badge tone={item.healthy ? 'green' : 'red'} dot>
+                    {item.id}: {item.healthy ? t('services.healthOk') : t('services.healthFail')}
+                  </Badge>
+                </span>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Tabs defaultIndex={1}>
         <TabsList>

@@ -15,7 +15,18 @@ if [ -f "RELEASE_NOTES_${VERSION}.md" ]; then
 fi
 GO="${GO:-go}"
 DIST="$ROOT/dist"
-LDFLAGS="-s -w"
+
+# Un release debe salir de un árbol limpio y de un commit identificable. El
+# binario lleva -X con estos valores, así que un artefacto "dirty" delatado
+# por go version -m no puede colarse en un tag publicado.
+if [ -z "${LAIR_ALLOW_DIRTY:-}" ] && [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+  echo "ERROR: el árbol de trabajo tiene cambios; limpia o usa LAIR_ALLOW_DIRTY=1" >&2
+  exit 1
+fi
+COMMIT="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+DATE="$(git -C "$ROOT" log -1 --format=%cd --date=format:%Y-%m-%d 2>/dev/null || echo unknown)"
+VERSION_PKG="github.com/lair-sh/lair/internal/version"
+LDFLAGS="-s -w -X ${VERSION_PKG}.BuildVersion=${VERSION} -X ${VERSION_PKG}.BuildCommit=${COMMIT} -X ${VERSION_PKG}.BuildDate=${DATE}"
 
 mkdir -p "$DIST"
 export CGO_ENABLED=0
@@ -44,7 +55,7 @@ desktop_dir() {
 build_binary() {
   local os="$1" arch="$2" out="$3"
   echo "==> go build $os/$arch -> $(basename "$out")"
-  GOOS="$os" GOARCH="$arch" "$GO" build -trimpath -ldflags "$LDFLAGS" -o "$out" ./cmd/lair
+  GOOS="$os" GOARCH="$arch" "$GO" build -buildmode=pie -trimpath -ldflags "$LDFLAGS" -o "$out" ./cmd/lair
 }
 
 STAGE="$(mktemp -d)"

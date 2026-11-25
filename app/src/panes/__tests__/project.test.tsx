@@ -24,6 +24,18 @@ function controller(client: FakeDaemon): LairController {
 }
 
 describe('asistente de nuevo proyecto', () => {
+  it('reintenta projectInfo cuando el daemon todavía no responde', async () => {
+    const daemon = new FakeDaemon({ fixture: demoFixture });
+    const original = daemon.projectInfo.bind(daemon);
+    const info = vi.spyOn(daemon, 'projectInfo')
+      .mockImplementationOnce(async () => { throw new Error('daemon is not available'); })
+      .mockImplementation(original);
+    renderPane(<ProjectDialog open onClose={() => {}} state={controller(daemon)} />);
+    await vi.waitFor(() => expect(info.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 4000 });
+    const parent = await screen.findByDisplayValue('/home/dev/Lair');
+    expect(parent).toBeTruthy();
+  });
+
   it('valida el nombre y crea un proyecto SQLite', async () => {
     const daemon = new FakeDaemon({ fixture: demoFixture });
     const projectCreate = vi.spyOn(daemon, 'projectCreate');
@@ -103,6 +115,25 @@ describe('asistente de nuevo proyecto', () => {
     expect(projectCreate.mock.calls[0]![0]).toMatchObject({
       database: 'mariadb', db_name: 'shop_dev', db_user: 'root', db_password: '',
     });
+  });
+
+  it('muestra solo el progreso mientras se crea el proyecto', async () => {
+    const daemon = new FakeDaemon({ fixture: demoFixture });
+    const projectCreate = vi.fn(async () => ({ id: 'project-blog' }));
+    const job = vi.fn(async () => ({ id: 'project-blog', done: false, phase: 'installing' }));
+    const log = vi.fn(async () => 'installer output');
+    const client = Object.assign(daemon, { projectCreate, job, log });
+
+    renderPane(<ProjectDialog open onClose={() => {}} state={controller(client)} />);
+    fireEvent.change(screen.getByLabelText('Project name'), { target: { value: 'blog' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create project' }));
+
+    await waitFor(() => expect(job).toHaveBeenCalled());
+    expect(screen.queryByText('installer output')).toBeNull();
+    expect(screen.getAllByText('Creating project…').length).toBeGreaterThan(0);
   });
 
   it('muestra el fallo del job y permite reintentar sin perder la contraseña', async () => {

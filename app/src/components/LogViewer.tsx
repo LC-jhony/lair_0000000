@@ -7,7 +7,7 @@ export interface LogViewerProps {
   onClose: () => void;
 }
 
-/** Read-only log panel, equivalent to the TUI's `v` command. */
+/** Read-only log panel, equivalent to `lair logs`. */
 export function LogViewer({ title, text, onClose }: LogViewerProps) {
   const t = useT();
   const dialogRef = useDialogFocus<HTMLDivElement>(true, onClose);

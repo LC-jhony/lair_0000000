@@ -58,9 +58,10 @@ export function LogsPane({ state }: PaneProps) {
       setItems(names);
       setSources(found);
       setSelected((current) => {
-        if (current && (names.includes(current) || found.some((s) => s.files?.includes(current)))) return current;
-        const firstFile = found.flatMap((s) => s.files ?? [])[0];
-        return firstFile ?? names[0] ?? '';
+        const keys = found.flatMap((s) => (s.files ?? []).map((file) =>
+          s.kind === 'site' ? `site:${s.id}:${file}` : file));
+        if (current && (names.includes(current) || keys.includes(current))) return current;
+        return keys[0] ?? names[0] ?? '';
       });
     } catch (cause) {
       if (aliveRef.current) setError(cause instanceof Error ? cause.message : String(cause));

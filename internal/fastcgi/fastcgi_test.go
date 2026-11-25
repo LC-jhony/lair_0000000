@@ -57,6 +57,40 @@ func fakeResponder(conn net.Conn, httpResponse string) {
 	}
 }
 
+func TestClientSendsParamsTerminator(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	terminated := make(chan bool, 1)
+	go func() {
+		defer serverConn.Close()
+		paramsEOF := false
+		for {
+			typ, data, err := readRecord(serverConn)
+			if err != nil {
+				return
+			}
+			if typ == paramsRecord && len(data) == 0 {
+				paramsEOF = true
+			}
+			if typ == stdinRecord && len(data) == 0 {
+				terminated <- paramsEOF
+				_ = writeOneRecord(serverConn, stdoutRecord, []byte("Status: 200 OK\r\nContent-Type: text/plain\r\n\r\nok"))
+				end := make([]byte, 8)
+				end[4] = requestComplete
+				_ = writeOneRecord(serverConn, endRequest, end)
+				return
+			}
+		}
+	}()
+	c := &Client{Conn: clientConn, Timeout: 2 * time.Second}
+	if _, err := c.Do(Request{Params: map[string]string{"A": "B"}, Body: []byte("x=1")}); err != nil {
+		t.Fatal(err)
+	}
+	if !<-terminated {
+		t.Fatal("missing empty FCGI_PARAMS terminator before STDIN")
+	}
+}
+
 func TestClientDo(t *testing.T) {
 	response := "Status: 201 Created\r\nContent-Type: application/json\r\nX-Test: yes\r\n\r\n{\"ok\":true}"
 	clientConn, serverConn := net.Pipe()

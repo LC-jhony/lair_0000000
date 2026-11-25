@@ -324,6 +324,13 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 		}
 		return job.Status(), nil
 	})
+	add(ActionDB, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req DBRequest
+		if err := decode(raw, &req); err != nil {
+			return nil, err
+		}
+		return e.DBControl(ctx, req)
+	})
 	add(ActionDBDefault, func(_ context.Context, raw json.RawMessage) (any, error) {
 		var req DBDefaultRequest
 		if err := decode(raw, &req); err != nil {
@@ -361,6 +368,30 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 		// Older clients send only `name`; unlink keeps project files intact.
 		return nil, e.Unlink(req.Name)
 	})
+	add(ActionSiteStack, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req SiteStackRequest
+		if err := decode(raw, &req); err != nil {
+			return nil, err
+		}
+		return e.StackControl(ctx, req.Name), nil
+	})
+	add(ActionSiteData, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req SiteDataRequest
+		if err := decode(raw, &req); err != nil {
+			return nil, err
+		}
+		return e.SiteData(ctx, req.Name), nil
+	})
+	add(ActionServicesHealth, func(ctx context.Context, _ json.RawMessage) (any, error) {
+		return e.ServicesHealth(ctx), nil
+	})
+	add(ActionQueue, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req QueueRequest
+		if err := decode(raw, &req); err != nil {
+			return nil, err
+		}
+		return e.QueueControl(ctx, req.Name), nil
+	})
 	add(ActionSite, func(ctx context.Context, raw json.RawMessage) (any, error) {
 		var req SiteRequest
 		if err := decode(raw, &req); err != nil {
@@ -389,6 +420,13 @@ func NewDispatcher(e *engine.Engine, shutdown func()) *Dispatcher {
 			return nil, err
 		}
 		return e.ProjectControlWith(jobContext(ctx), req)
+	})
+	add(ActionWorktree, func(ctx context.Context, raw json.RawMessage) (any, error) {
+		var req WorktreeRequest
+		if err := decode(raw, &req); err != nil {
+			return nil, err
+		}
+		return e.WorktreeControl(ctx, req)
 	})
 	add(ActionPin, func(_ context.Context, raw json.RawMessage) (any, error) {
 		var req PinRequest

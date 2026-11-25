@@ -4,10 +4,16 @@ import type { DaemonClient } from './models';
 
 export { ACTIONS, connectFromDesktop, DaemonError, HttpDaemonClient } from './client';
 export { demoFixture, FakeDaemon } from './fake';
-export { activeVersion, installedVersions, jobProgress, toComponentJob } from './models';
+export { activeVersion, installedVersions, jobProgress, projectProgress, toComponentJob } from './models';
 export type {
   DaemonClient,
+  DBResult,
+  SnapshotInfo,
   JobStatus,
+  QueueInfo,
+  ServiceHealth,
+  SiteData,
+  SiteStack,
   LairStatus,
   PhpInfo,
   ServiceView,
@@ -25,6 +31,11 @@ export type {
   MailOp,
   DumpsResult,
   DumpEvent,
+  QueryStat,
+  SlowQuery,
+  NPlusOne,
+  DumpInsights,
+  RequestTimeline,
   DumpsOptions,
   DumpsPayload,
   DumpsOp,

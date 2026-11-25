@@ -119,7 +119,9 @@ func (e *Engine) siteVHosts(s config.WebSettings) ([]vhostSite, error) {
 		if err != nil {
 			return nil, err
 		}
-		if s.HTTPS {
+		// A site whose HTTPS was explicitly turned off must stay off: syncWeb
+		// runs for every config change and must not re-issue its certificate.
+		if s.HTTPS && e.siteIsSecure(name, site) {
 			if err := e.issueSiteCertificate(name, site.Domains); err != nil {
 				return nil, fmt.Errorf("certificado para %s: %w", name, err)
 			}
@@ -138,8 +140,9 @@ func (e *Engine) siteVHost(name string, site config.Site, s config.WebSettings) 
 	if err != nil {
 		return vhostSite{}, err
 	}
+	_, docRoot, _ := siteProfile(site.Path)
 	ns := vhostSite{
-		Name: name, Root: site.Path, PHPSocket: sock,
+		Name: name, Root: site.Path, DocRoot: docRoot, PHPSocket: sock,
 		Domains:   append([]string(nil), site.Domains...),
 		Enabled:   site.Enabled,
 		RootState: detectSiteRoot(site.Path).state,
@@ -300,7 +303,7 @@ func (e *Engine) StartWeb() error {
 	return nil
 }
 
-// WebControl implements the single daemon action used by desktop, TUI and CLI.
+// WebControl implements the single daemon action used by desktop and CLI.
 func (e *Engine) WebControl(ctx context.Context, req WebRequest) (WebResult, error) {
 	op := strings.ToLower(strings.TrimSpace(req.Op))
 	if op == "" {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Database, ExternalLink, FileText, Mail, Server } from 'lucide-react';
-import type { LogSource, MailResult, SiteDetail, SiteEnvEntry, SiteView } from '../api';
+import { Database, Eye, EyeOff, ExternalLink, FileText, Mail, Server } from 'lucide-react';
+import type { LogSource, MailResult, QueueInfo, SiteData, SiteDetail, SiteEnvEntry, SiteStack, SiteView } from '../api';
 import {
   Badge,
   Button,
@@ -58,7 +58,12 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
   const [detail, setDetail] = useState<SiteDetail | null>(null);
   const [env, setEnv] = useState<SiteEnvEntry[]>([]);
   const [mail, setMail] = useState<MailResult | null>(null);
+  const [queueInfo, setQueueInfo] = useState<QueueInfo | null>(null);
+  const [siteData, setSiteData] = useState<SiteData | null>(null);
+  const [stack, setStack] = useState<SiteStack | null>(null);
   const [envDrafts, setEnvDrafts] = useState<Record<string, string>>({});
+  const [dbPassword, setDbPassword] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [logs, setLogs] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -89,20 +94,43 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
         ]);
         if (!alive) return;
         setDetail(detailResult.detail ?? null);
-        setEnv(envResult.env ?? []);
-        setEnvDrafts({});
+        setDbPassword(null);
+        setShowPassword(false);
+        const entries = envResult.env ?? [];
+        setEnv(entries);
+        // Show the real value in the editable input for non-secret keys.
+        // Secrets arrive empty from the daemon and must never be prefilled.
+        setEnvDrafts(Object.fromEntries(
+          entries.filter((item) => item.key && !item.secret).map((item) => [item.key!, item.value ?? '']),
+        ));
         setMail(mailResult);
 
         // Logs are grouped by source; pick this site's files, falling back to
         // every site source when the daemon does not name them consistently.
+        try {
+          setQueueInfo(await client.queue(name));
+        } catch {
+          setQueueInfo(null); // older daemon without the queue action
+        }
+        try {
+          setSiteData(await client.siteData(name));
+        } catch {
+          setSiteData(null);
+        }
+        try {
+          setStack(await client.siteStack(name));
+        } catch {
+          setStack(null);
+        }
         const sources = await client.logSources();
         const short = name.split('.')[0] || name;
         const matches = (s: LogSource) =>
           s.kind === 'site' &&
           (s.id === name || s.name === name || s.id === short || s.name?.split('.')[0] === short);
         const siteSources = sources.filter(matches);
-        const files = (siteSources.length > 0 ? siteSources : sources.filter((s) => s.kind === 'site'))
-          .flatMap((s) => s.files ?? []);
+        const chosen = siteSources.length > 0 ? siteSources : sources.filter((s) => s.kind === 'site');
+        const files = chosen.flatMap((s) => (s.files ?? []).map((file) =>
+          s.kind === 'site' ? `site:${s.id}:${file}` : file));
         const texts = await Promise.all(files.map((file) => client.log(file)));
         if (alive) setLogs(texts.filter(Boolean).join('\n').trim());
       } catch (cause) {
@@ -169,6 +197,23 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
     });
   };
 
+  const togglePassword = () => {
+    if (!name || !state.client) return;
+    if (dbPassword !== null) {
+      setShowPassword((value) => !value);
+      return;
+    }
+    void (async () => {
+      try {
+        const result = await state.client!.site({ op: 'env', name, key: 'DB_PASSWORD', reveal: true });
+        setDbPassword(result.value ?? '');
+        setShowPassword(true);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    })();
+  };
+
   const phpOptions = [
     { value: '', label: t('site.runtime.default') },
     ...(state.status?.php ?? []).map((item) => ({
@@ -211,6 +256,8 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
             <TabsTrigger>{t('site.tab.database')}</TabsTrigger>
             <TabsTrigger>{t('site.tab.mail')}</TabsTrigger>
             <TabsTrigger>{t('site.tab.queues')}</TabsTrigger>
+            <TabsTrigger>{t('site.tab.stack')}</TabsTrigger>
+            <TabsTrigger>{t('site.tab.data')}</TabsTrigger>
             <TabsTrigger>{t('site.tab.phpNode')}</TabsTrigger>
             <TabsTrigger>{t('site.tab.logs')}</TabsTrigger>
           </TabsList>
@@ -276,7 +323,7 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
               )}
             </TabsPanel>
 
-            {/* 2. Environment — values are masked; secrets are never rendered. */}
+            {/* 2. Environment — non-secret values are shown; secrets stay masked. */}
             <TabsPanel className="flex flex-col gap-4">
               <p className="text-xs text-muted-foreground">{t('site.env.help')}</p>
               {env.length === 0 ? (
@@ -294,7 +341,8 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
                             {entry.set && <Badge tone="green">{t('site.env.set')}</Badge>}
                           </div>
                           <p className="mt-0.5 text-xs text-muted-foreground">
-                            {t('site.env.value')}: {t('site.env.masked')}
+                            {t('site.env.value')}:{' '}
+                            {entry.secret ? t('site.env.masked') : (entry.value || '—')}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -333,7 +381,28 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
                 <Metric label={t('site.db.port')} value={String(detail?.database_port ?? '')} />
                 <Metric label={t('site.db.name')} value={detail?.database_name ?? ''} />
                 <Metric label={t('site.db.user')} value={envValue('DB_USERNAME') || '—'} />
-                <Metric label={t('site.db.password')} value={env.some((e) => e.key === 'DB_PASSWORD') ? t('site.env.masked') : '—'} />
+                <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                  <span className="shrink-0 text-xs text-muted-foreground">{t('site.db.password')}</span>
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <Input
+                      readOnly
+                      type={showPassword ? 'text' : 'password'}
+                      aria-label={t('site.db.password')}
+                      value={showPassword ? (dbPassword ?? '') : t('site.env.masked')}
+                      className="h-7 w-32 text-right text-sm"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      aria-label={showPassword ? t('site.db.hide') : t('site.db.reveal')}
+                      disabled={!env.some((e) => e.key === 'DB_PASSWORD') || !!state.busy}
+                      onClick={togglePassword}
+                    >
+                      {showPassword ? <EyeOff className="size-4" aria-hidden="true" /> : <Eye className="size-4" aria-hidden="true" />}
+                    </Button>
+                  </div>
+                </div>
               </div>
               <p className="text-xs text-muted-foreground">{t('site.db.driverHelp')}</p>
               <div className="flex flex-wrap items-end gap-2">
@@ -376,7 +445,13 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
             {/* 5. Queues — read-only */}
             <TabsPanel className="flex flex-col gap-4">
               <p className="text-xs text-muted-foreground">{t('site.queues.help')}</p>
-              <Metric label={t('site.queues.database')} value={detail?.database ?? ''} />
+              <Metric label={t('site.queues.driver')} value={queueInfo?.driver ?? detail?.database ?? ''} />
+              <div className="flex flex-wrap gap-2">
+                <Badge tone="blue">{t('site.queues.pending', { count: queueInfo?.pending ?? 0 })}</Badge>
+                <Badge tone={queueInfo?.failed ? 'red' : 'neutral'}>{t('site.queues.failed', { count: queueInfo?.failed ?? 0 })}</Badge>
+              </div>
+              {queueInfo?.error && <p className="text-xs text-destructive">{queueInfo.error}</p>}
+              {queueInfo?.hint && <p className="text-xs text-muted-foreground">{queueInfo.hint}</p>}
               {services.length === 0 ? (
                 <p className="text-xs text-muted-foreground">{t('site.queues.noServices')}</p>
               ) : (
@@ -400,7 +475,43 @@ export function SiteDetailDialog({ open, site, state, onClose, onNavigate }: Sit
               </Button>
             </TabsPanel>
 
-            {/* 6. PHP & Node.js */}
+            {/* 6. Stack — detected technologies, no credentials */}
+            <TabsPanel className="flex flex-col gap-4">
+              <p className="text-xs text-muted-foreground">{t('site.stack.help')}</p>
+              {stack?.error && <p role="alert" className="text-xs text-destructive">{stack.error}</p>}
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Metric label={t('site.stack.framework')} value={`${stack?.framework ?? '—'} ${stack?.framework_version ?? ''}`.trim()} />
+                <Metric label={t('site.stack.database')} value={`${stack?.database ?? '—'}${stack?.database_name ? ` · ${stack.database_name}` : ''}`} />
+                {stack?.database_host && <Metric label={t('site.stack.dbHost')} value={`${stack.database_host}${stack.database_port ? `:${stack.database_port}` : ''}`} />}
+                <Metric label={t('site.stack.cache')} value={stack?.cache ?? '—'} />
+                <Metric label={t('site.stack.webRoot')} value={stack?.web_root ?? '—'} />
+                <Metric label={t('site.stack.front')} value={stack?.front_controller ?? '—'} />
+                <Metric label={t('site.stack.server')} value={stack?.server ?? '—'} />
+                <Metric label={t('site.stack.php')} value={`${stack?.php ?? '—'} · ${stack?.node ?? '—'}`} />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {(stack?.components ?? []).map((component) => (
+                  <Badge key={component} tone="neutral">{component}</Badge>
+                ))}
+              </div>
+            </TabsPanel>
+
+            {/* 7. Data — read-only counts, no values */}
+            <TabsPanel className="flex flex-col gap-4">
+              <p className="text-xs text-muted-foreground">{t('site.data.help')}</p>
+              {siteData?.error && <p role="alert" className="text-xs text-destructive">{siteData.error}</p>}
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(siteData?.tables ?? []).map((table) => (
+                  <Metric key={table.name} label={table.name ?? '—'} value={table.error ? '—' : String(table.rows ?? 0)} />
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge tone="blue">{t('site.data.cache', { count: siteData?.cache_keys ?? 0 })}</Badge>
+                <Badge tone="indigo">{t('site.data.mail', { count: siteData?.mail ?? 0 })}</Badge>
+              </div>
+            </TabsPanel>
+
+            {/* 7. PHP & Node.js */}
             <TabsPanel className="flex flex-col gap-4">
               <p className="text-xs text-muted-foreground">{t('site.runtime.help')}</p>
               <Card>

@@ -132,7 +132,7 @@ func testEnv(t *testing.T) (*Engine, *httptest.Server) {
 	return e, srv
 }
 
-// Regression: pressing "n" in the TUI must install Node LTS even when the
+// Regression: the Node LTS fallback must work even when the
 // daemon starts with a nil or empty catalog (stale process, empty cache).
 func TestEmptyCatalogFallsBackToEmbeddedNodeLTS(t *testing.T) {
 	t.Setenv("LAIR_HOME", t.TempDir())
