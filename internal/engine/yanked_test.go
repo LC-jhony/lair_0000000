@@ -137,7 +137,19 @@ func TestReplaceYankedBuild(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(paths.PHP, "8.4", "bin", "php")); err != nil {
 				t.Fatalf("replacement binary missing: %v", err)
 			}
-			return
+			// The config is written before the job releases its log file and
+			// leaves the goroutine. Wait for the job to finish so TempDir
+			// cleanup does not race with the last writes.
+			for {
+				st, ok := e.Installer.JobStatus("php-8.4")
+				if ok && st.Done {
+					return
+				}
+				if !time.Now().Before(deadline) {
+					t.Fatal("replacement job did not finish")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
